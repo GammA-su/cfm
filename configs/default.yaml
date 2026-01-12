@@ -1,0 +1,54 @@
+seed: 1234
+
+runtime:
+  cpu_threads: 16
+  prefer_gpu: true
+  use_faiss: true
+
+data:
+  raw_dir: data/raw
+  factbank_dir: data/factbank
+  emb_dir: data/emb
+  codes_dir: data/codes
+  max_triples: 1500
+  max_facts: 800
+  orbits_per_fact: 10
+  negatives_per_fact: 5
+  use_direct_tar: true
+  wikidata5m_sources: ["transductive"]
+  hf_cache_dir: .cache/huggingface
+  use_streaming: true
+  shuffle: false
+  shuffle_buffer: 1000
+  local_files_only: false
+
+model:
+  backbone: tiny
+  hf_model_name: "sshleifer/tiny-gpt2"
+  d_model: 256
+  n_layers: 2
+  n_heads: 4
+  max_seq_len: 64
+  vocab_max: null
+  m: 4
+  K: 1024
+  d_code: 256
+
+rvq:
+  iters: 8
+  seed: 1234
+
+train:
+  batch_size: 32
+  steps: 1200
+  lr: 3.0e-4
+  weight_decay: 0.01
+  log_every: 20
+  contrast_margin: 0.2
+
+inference:
+  max_gen_tokens: 8
+
+eval:
+  max_samples: 200
+  calib_bins: 10
