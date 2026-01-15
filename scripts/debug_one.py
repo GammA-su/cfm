@@ -19,7 +19,13 @@ import typer
 import yaml
 from datasets import get_dataset_config_names, load_dataset
 
-from eval_lama import _build_prompt, _load_lama_fallback
+from eval_lama import (
+    _build_code_to_answer_map,
+    _build_prompt,
+    _decode_pred,
+    _fallback_token_from_logits,
+    _load_lama_fallback,
+)
 from forge_omega_500.model.cfm import CFMModel
 from forge_omega_500.model.utils import SimpleTokenizer, pad_sequences, set_seed
 
@@ -80,11 +86,13 @@ def main(
     model_cfg = cfg["model"]
     data_cfg = cfg["data"]
     eval_cfg = cfg.get("eval", {})
+    inf_cfg = cfg.get("inference", {})
 
     out_dir = Path("out")
     tokenizer = SimpleTokenizer.load(out_dir / "tokenizer.json")
 
-    codebook_path = Path(data_cfg["codes_dir"]) / "codebooks.safetensors"
+    codes_dir = Path(data_cfg["codes_dir"])
+    codebook_path = codes_dir / "codebooks.safetensors"
     model = CFMModel.from_codebooks(
         codebook_path,
         vocab_size=len(tokenizer.vocab),
@@ -105,6 +113,12 @@ def main(
     model.to(device)
     logger.info("model_to_device done device=%s", device.type)
 
+    code_to_answer = _build_code_to_answer_map(codes_dir / "answer_codes.parquet")
+    abstain_on_empty = bool(inf_cfg.get("abstain_on_empty", False))
+    if max_new_tokens < 4:
+        logger.warning("max_new_tokens_too_small value=%s clamped=4", max_new_tokens)
+        max_new_tokens = 4
+
     local_files_only = bool(data_cfg.get("local_files_only", False))
     cache_dir = Path(data_cfg.get("hf_cache_dir", ".cache/huggingface"))
     max_samples = int(eval_cfg.get("max_samples", 0))
@@ -118,6 +132,8 @@ def main(
 
     example = ds[index]
     prompt = _build_prompt(example)
+    if not prompt:
+        raise typer.BadParameter("empty prompt: missing required subject/mask fields")
     prompt_ids = [[tokenizer.bos_id] + tokenizer.encode(prompt)]
     prompt_ids, prompt_masks = pad_sequences(
         prompt_ids,
@@ -142,13 +158,28 @@ def main(
         if gen_codes is not None:
             code_tuple = gen_codes
         raw_token_ids = generated[0].tolist()
-        pred_text = tokenizer.decode(raw_token_ids)
+        generated_token_count = max(0, int(generated.size(1)) - 1)
+        pred_text = _decode_pred(tokenizer, raw_token_ids)
+        fallback_used = False
+        if not pred_text.strip() and not abstain_on_empty:
+            code_key = tuple(int(x) for x in code_tuple[0].tolist())
+            fallback = code_to_answer.get(code_key, "")
+            if fallback:
+                pred_text = fallback
+                fallback_used = True
+            else:
+                fallback_token = _fallback_token_from_logits(model, prompt_ids, prompt_masks, code_tuple, tokenizer)
+                pred_text = fallback_token or tokenizer.unk_token
+                fallback_used = True
+        decoded_len = len(pred_text)
         print("prompt:", prompt)
         print("codes:", [int(x) for x in code_tuple[0].tolist()])
         print("conf:", float(conf.item()))
         print("token_ids:", raw_token_ids)
         print("pred:", repr(pred_text))
-        print("pred_len:", len(pred_text))
+        print("pred_len:", decoded_len)
+        print("generated_token_count:", generated_token_count)
+        print("fallback_used:", fallback_used)
         return
 
     generated = torch.full((1, 1), tokenizer.bos_id, device=device, dtype=torch.long)
@@ -162,12 +193,16 @@ def main(
     _, logits = model.forward_generation(input_ids, attn, code_tuple)
     topk = torch.topk(logits[:, -1], k=min(5, logits.size(-1)), dim=-1)
     topk_pairs = list(zip(topk.indices[0].tolist(), topk.values[0].tolist()))
+    fallback_token = _fallback_token_from_logits(model, prompt_ids, prompt_masks, code_tuple, tokenizer)
+    pred_text = fallback_token or tokenizer.unk_token
     print("prompt:", prompt)
     print("codes:", [int(x) for x in code_tuple[0].tolist()])
     print("conf:", float(conf.item()))
     print("logits_top5:", topk_pairs)
-    print("pred:", repr(""))
-    print("pred_len:", 0)
+    print("pred:", repr(pred_text))
+    print("pred_len:", len(pred_text))
+    print("generated_token_count:", 0)
+    print("fallback_used:", True)
 
 
 if __name__ == "__main__":

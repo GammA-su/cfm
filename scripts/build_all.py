@@ -21,7 +21,13 @@ from rich.console import Console
 from forge_omega_500.data.build_factbank import build_factbank_records, save_factbank
 from forge_omega_500.data.embeddings import build_answer_embeddings
 from forge_omega_500.data.hf_ingest import ingest_wikidata5m, ingest_wikidata5m_tar, load_triples
-from forge_omega_500.data.rvq import assign_codes, save_answer_codes, save_codebooks, train_rvq
+from forge_omega_500.data.rvq import (
+    assign_codes,
+    save_answer_codes,
+    save_code_to_label,
+    save_codebooks,
+    train_rvq,
+)
 from forge_omega_500.model.utils import set_seed
 
 console = Console()
@@ -138,6 +144,7 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
 
     save_codebooks(codebooks, codes_dir / "codebooks.safetensors")
     save_answer_codes(answers, codes, codes_dir / "answer_codes.parquet")
+    save_code_to_label(records, answers, codes, codes_dir / "code_to_label.parquet")
 
     metadata_path = factbank_dir / "build_summary.json"
     metadata_path.write_text(json.dumps({"facts": len(records), "answers": len(answers)}, indent=2))

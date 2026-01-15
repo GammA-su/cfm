@@ -67,6 +67,7 @@ from datasets.download.download_manager import DownloadManager
 _set_startup_stage("import rich.console")
 from rich.console import Console
 
+from forge_omega_500.data.rvq import load_code_to_label, lookup_code_label
 from forge_omega_500.eval.metrics import calibration_curve
 from forge_omega_500.model.cfm import CFMModel
 from forge_omega_500.model.utils import SimpleTokenizer, pad_sequences, set_seed
@@ -272,12 +273,48 @@ def _normalize_for_em(pred: str, gold: str) -> Tuple[str, str]:
     return pred_norm, gold_norm
 
 
-def _decode_with_fallback(tokenizer: SimpleTokenizer, token_ids: List[int]) -> str:
-    decoded = tokenizer.decode(token_ids)
-    if decoded:
-        return decoded
-    raw_tokens = [tokenizer.inv_vocab.get(i, tokenizer.unk_token) for i in token_ids]
-    return " ".join(raw_tokens).strip()
+def _decode_pred(tokenizer: SimpleTokenizer, token_ids: List[int]) -> str:
+    return tokenizer.decode(token_ids)
+
+
+def _build_code_to_answer_map(path: Path) -> Dict[Tuple[int, ...], str]:
+    if not path.exists():
+        logger.warning("code_to_label_missing path=%s", path)
+        return {}
+    try:
+        mapping = load_code_to_label(path)
+    except Exception as exc:
+        logger.warning("code_to_label_load_failed path=%s err=%s", path, exc)
+        return {}
+    logger.info("code_to_label_loaded entries=%s", len(mapping))
+    return mapping
+
+
+def _fallback_token_from_logits(
+    model: CFMModel,
+    prompt_ids: torch.Tensor,
+    prompt_masks: torch.Tensor,
+    codes: torch.Tensor,
+    tokenizer: SimpleTokenizer,
+) -> str:
+    batch_size = prompt_ids.size(0)
+    generated = torch.full((batch_size, 1), tokenizer.bos_id, device=prompt_ids.device, dtype=torch.long)
+    attention = torch.ones_like(generated)
+    input_ids = torch.cat([prompt_ids, torch.full_like(prompt_ids[:, :1], tokenizer.sep_id), generated], dim=1)
+    attn = torch.cat([prompt_masks, torch.ones_like(prompt_ids[:, :1]), attention], dim=1)
+    if model.max_seq_len and input_ids.size(1) > model.max_seq_len:
+        overflow = input_ids.size(1) - model.max_seq_len
+        input_ids = input_ids[:, overflow:]
+        attn = attn[:, overflow:]
+    _, logits = model.forward_generation(input_ids, attn, codes)
+    next_logits = logits[:, -1]
+    topk = torch.topk(next_logits, k=min(10, next_logits.size(-1)), dim=-1)
+    skip_ids = {tokenizer.pad_id, tokenizer.bos_id, tokenizer.eos_id, tokenizer.sep_id}
+    for token_id in topk.indices[0].tolist():
+        if token_id not in skip_ids:
+            return tokenizer.inv_vocab.get(token_id, tokenizer.unk_token)
+    top_id = int(topk.indices[0][0].item())
+    return tokenizer.inv_vocab.get(top_id, tokenizer.unk_token)
 
 
 @app.command()
@@ -303,7 +340,7 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
     model_cfg = cfg["model"]
     data_cfg = cfg["data"]
     eval_cfg = cfg["eval"]
-    inf_cfg = cfg["inference"]
+    inf_cfg = cfg.get("inference", {})
 
     out_dir = Path("out")
     _ensure_file_logger(out_dir)
@@ -313,7 +350,8 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
     tokenizer = SimpleTokenizer.load(out_dir / "tokenizer.json")
     logger.info("load_tokenizer done vocab_size=%s time=%.2fs", len(tokenizer.vocab), time.perf_counter() - t0)
 
-    codebook_path = Path(data_cfg["codes_dir"]) / "codebooks.safetensors"
+    codes_dir = Path(data_cfg["codes_dir"])
+    codebook_path = codes_dir / "codebooks.safetensors"
     logger.info("init_model start")
     t0 = time.perf_counter()
     model = CFMModel.from_codebooks(
@@ -339,6 +377,8 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
     model.to(device)
     logger.info("model_to_device done device=%s", device.type)
 
+    code_to_answer = _build_code_to_answer_map(codes_dir / "code_to_label.parquet")
+
     local_files_only = bool(data_cfg.get("local_files_only", False))
     cache_dir = Path(data_cfg.get("hf_cache_dir", ".cache/huggingface"))
     use_fallback = False
@@ -353,6 +393,12 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
     logger.info("discover_lama_configs done use_fallback=%s", use_fallback)
     report = {}
     logger.info("lama_configs=%s", ",".join(target_configs))
+
+    max_gen_tokens = int(inf_cfg.get("max_gen_tokens", 8))
+    if max_gen_tokens < 4:
+        logger.warning("max_gen_tokens_too_small value=%s clamped=4", max_gen_tokens)
+        max_gen_tokens = 4
+    abstain_on_empty = bool(inf_cfg.get("abstain_on_empty", False))
 
     for cfg_name in target_configs:
         max_samples = int(eval_cfg["max_samples"])
@@ -405,15 +451,37 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
             prompt_masks = prompt_masks.to(device)
 
             addr_logits, conf, _ = model.encode_prompt(prompt_ids, prompt_masks)
-            generated, _ = model.generate_answer(
+            generated, codes = model.generate_answer(
                 prompt_ids,
                 prompt_masks,
-                max_new_tokens=int(inf_cfg["max_gen_tokens"]),
+                max_new_tokens=max_gen_tokens,
                 eos_id=tokenizer.eos_id,
                 bos_id=tokenizer.bos_id,
                 sep_id=tokenizer.sep_id,
             )
-            pred_text = _decode_with_fallback(tokenizer, generated[0].tolist())
+            generated_token_count = max(0, int(generated.size(1)) - 1)
+            pred_text = _decode_pred(tokenizer, generated[0].tolist())
+            fallback_used = False
+            mapping_hit = False
+            if not pred_text.strip() and not abstain_on_empty:
+                fallback, mapping_hit = lookup_code_label(code_to_answer, codes[0].tolist())
+                if fallback:
+                    pred_text = fallback
+                    fallback_used = True
+                else:
+                    fallback_token = _fallback_token_from_logits(model, prompt_ids, prompt_masks, codes, tokenizer)
+                    pred_text = fallback_token or tokenizer.unk_token
+                    fallback_used = True
+            decoded_len = len(pred_text)
+            logger.info(
+                "pred_stats cfg=%s index=%s generated_token_count=%s decoded_len=%s fallback_used=%s mapping_hit=%s",
+                cfg_name,
+                idx,
+                generated_token_count,
+                decoded_len,
+                fallback_used,
+                mapping_hit,
+            )
             gold = _gold_answer(example)
             pred_norm, gold_norm = _normalize_for_em(pred_text, gold)
             acc = 1.0 if pred_norm == gold_norm else 0.0
