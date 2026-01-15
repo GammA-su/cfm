@@ -7,13 +7,13 @@ name = "forge_omega_500"
 version = "0.1.0"
 description = "Toy-scale Combinatorial Fact Memory (CFM) pipeline and evaluation harness."
 readme = "README.md"
-requires-python = ">=3.10,<3.12"
+requires-python = ">=3.10,<3.11"
 license = {text = "MIT"}
 authors = [{name = "Codex"}]
 
 dependencies = [
   "torch>=2.1.0",
-  "numpy>=1.24.0",
+  "numpy<2",
   "datasets>=2.17.0",
   "transformers>=4.38.0",
   "typer>=0.9.0",
@@ -22,10 +22,11 @@ dependencies = [
   "pyyaml>=6.0.1",
   "pyarrow>=14.0.0",
   "pandas>=2.1.0",
+  "pytest>=7.4.0",
+  "faiss-gpu"
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=7.4.0"]
 faiss-cpu = ["faiss-cpu>=1.7.4"]
 faiss-gpu = ["faiss-gpu>=1.7.2,<1.8"]
 

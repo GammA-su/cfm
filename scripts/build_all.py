@@ -102,8 +102,20 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
     answers, embeddings = build_answer_embeddings(records, dim=int(model_cfg["d_code"]), emb_dir=emb_dir)
     logger.info("answers=%s emb_dim=%s", len(answers), int(model_cfg["d_code"]))
 
-    logger.info("train_rvq start (faiss=%s faiss_gpu=%s)", bool(faiss_info["faiss"]), faiss_info["faiss_gpu_available"])
     rvq_cfg = cfg["rvq"]
+    require_faiss_gpu = bool(rvq_cfg.get("require_faiss_gpu", False))
+    if require_faiss_gpu:
+        if not use_faiss:
+            raise RuntimeError("rvq.require_faiss_gpu=true requires runtime.use_faiss=true")
+        if not prefer_gpu:
+            raise RuntimeError("rvq.require_faiss_gpu=true requires runtime.prefer_gpu=true")
+        if not faiss_info["faiss_gpu_available"]:
+            raise RuntimeError("rvq.require_faiss_gpu=true but faiss GPU is unavailable; install faiss-gpu")
+
+    logger.info("train_rvq start (faiss=%s faiss_gpu=%s)", bool(faiss_info["faiss"]), faiss_info["faiss_gpu_available"])
+    gpu_search_batch = rvq_cfg.get("gpu_search_batch", None)
+    if gpu_search_batch is not None:
+        gpu_search_batch = int(gpu_search_batch)
     codebooks = train_rvq(
         embeddings,
         m=int(model_cfg["m"]),
@@ -112,8 +124,17 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
         seed=int(rvq_cfg["seed"]),
         faiss_mod=faiss_info["faiss"],
         use_gpu=bool(faiss_info["faiss_gpu_available"]),
+        require_gpu=require_faiss_gpu,
+        gpu_search_batch=gpu_search_batch,
     )
-    codes = assign_codes(embeddings, codebooks, faiss_mod=faiss_info["faiss"], use_gpu=bool(faiss_info["faiss_gpu_available"]))
+    codes = assign_codes(
+        embeddings,
+        codebooks,
+        faiss_mod=faiss_info["faiss"],
+        use_gpu=bool(faiss_info["faiss_gpu_available"]),
+        require_gpu=require_faiss_gpu,
+        gpu_search_batch=gpu_search_batch,
+    )
 
     save_codebooks(codebooks, codes_dir / "codebooks.safetensors")
     save_answer_codes(answers, codes, codes_dir / "answer_codes.parquet")

@@ -4,10 +4,10 @@ Version: 0.1.0
 Summary: Toy-scale Combinatorial Fact Memory (CFM) pipeline and evaluation harness.
 Author: Codex
 License: MIT
-Requires-Python: <3.12,>=3.10
+Requires-Python: <3.11,>=3.10
 Description-Content-Type: text/markdown
 Requires-Dist: torch>=2.1.0
-Requires-Dist: numpy>=1.24.0
+Requires-Dist: numpy<2
 Requires-Dist: datasets>=2.17.0
 Requires-Dist: transformers>=4.38.0
 Requires-Dist: typer>=0.9.0
@@ -16,8 +16,8 @@ Requires-Dist: safetensors>=0.4.0
 Requires-Dist: pyyaml>=6.0.1
 Requires-Dist: pyarrow>=14.0.0
 Requires-Dist: pandas>=2.1.0
-Provides-Extra: test
-Requires-Dist: pytest>=7.4.0; extra == "test"
+Requires-Dist: pytest>=7.4.0
+Requires-Dist: faiss-gpu
 Provides-Extra: faiss-cpu
 Requires-Dist: faiss-cpu>=1.7.4; extra == "faiss-cpu"
 Provides-Extra: faiss-gpu

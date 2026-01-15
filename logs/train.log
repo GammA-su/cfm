@@ -1,0 +1,1061 @@
+[startup +0.00s] configure_env
+[startup +0.00s] import numpy
+[startup +2.03s] import torch
+[startup +22.49s] import torch.nn.functional
+[startup +22.49s] import typer
+[startup +22.74s] import yaml
+[startup +22.93s] import rich.console
+[startup +30.03s] still import rich.console
+[startup +60.06s] still import rich.console
+[startup +82.44s] ready
+2026-01-14 09:24:19,325 INFO faiss.loader: Loading faiss with AVX2 support.
+2026-01-14 09:24:19,645 INFO faiss.loader: Successfully loaded faiss with AVX2 support.
+2026-01-14 09:24:19,660 INFO train_cfm: gpu_enabled=true gpu_count=1 torch_cuda=true device=cuda
+2026-01-14 09:24:19,660 INFO train_cfm: faiss_available=true faiss_gpu_enabled=true faiss_gpu_count=1
+2026-01-14 09:24:19,664 INFO train_cfm: file_logging_enabled path=out/train_cfm.log
+2026-01-14 09:24:19,666 INFO train_cfm: load_factbank start
+2026-01-14 09:24:20,696 INFO train_cfm: load_factbank done records=8000 time=1.03s
+2026-01-14 09:24:20,697 INFO train_cfm: load_answer_codes start path=data/codes/answer_codes.parquet
+2026-01-14 09:24:20,984 INFO train_cfm: load_answer_codes done answers=4170 time=0.29s
+2026-01-14 09:24:20,985 INFO train_cfm: build_examples start
+2026-01-14 09:24:21,345 INFO train_cfm: build_examples done examples=200000 orbits_per_fact=25 time=0.36s
+2026-01-14 09:24:21,375 INFO train_cfm: build_tokenizer start texts=400000
+2026-01-14 09:24:21,934 INFO train_cfm: build_tokenizer done vocab_size=12426 time=0.56s
+2026-01-14 09:24:21,970 INFO train_cfm: init_model start
+2026-01-14 09:24:22,267 INFO train_cfm: init_model done params=10129921 time=0.30s
+2026-01-14 09:24:22,888 INFO train_cfm: model_to_device done device=cuda
+2026-01-14 09:24:22,890 INFO train_cfm: optimizer_init done
+2026-01-14 09:24:22,890 INFO train_cfm: training start steps=6000 batch_size=64 device=cuda log_every=20 time_log_interval=30.0s
+2026-01-14 09:24:27,736 INFO train_cfm: train step=20/6000 loss=11.2183 addr=10.6184 gen=0.5874 contrast=0.0125 step_s=0.242 avg_s=0.242
+step 20/6000 loss=11.2183 addr=10.6184 gen=0.5874
+contrast=0.0125
+2026-01-14 09:24:29,541 INFO train_cfm: train step=40/6000 loss=6.7465 addr=6.6748 gen=0.0717 contrast=0.0000 step_s=0.090 avg_s=0.166
+step 40/6000 loss=6.7465 addr=6.6748 gen=0.0717 
+contrast=0.0000
+2026-01-14 09:24:31,326 INFO train_cfm: train step=60/6000 loss=6.6148 addr=6.5729 gen=0.0294 contrast=0.0125 step_s=0.090 avg_s=0.140
+step 60/6000 loss=6.6148 addr=6.5729 gen=0.0294 
+contrast=0.0125
+2026-01-14 09:24:33,126 INFO train_cfm: train step=80/6000 loss=5.5353 addr=5.5147 gen=0.0206 contrast=0.0000 step_s=0.090 avg_s=0.128
+step 80/6000 loss=5.5353 addr=5.5147 gen=0.0206 
+contrast=0.0000
+2026-01-14 09:24:34,912 INFO train_cfm: train step=100/6000 loss=5.9968 addr=5.9688 gen=0.0155 contrast=0.0125 step_s=0.090 avg_s=0.120
+step 100/6000 loss=5.9968 addr=5.9688 gen=0.0155 
+contrast=0.0125
+2026-01-14 09:24:36,689 INFO train_cfm: train step=120/6000 loss=5.9226 addr=5.9100 gen=0.0126 contrast=0.0000 step_s=0.089 avg_s=0.115
+step 120/6000 loss=5.9226 addr=5.9100 gen=0.0126 
+contrast=0.0000
+2026-01-14 09:24:38,487 INFO train_cfm: train step=140/6000 loss=5.9005 addr=5.8775 gen=0.0105 contrast=0.0125 step_s=0.090 avg_s=0.111
+step 140/6000 loss=5.9005 addr=5.8775 gen=0.0105 
+contrast=0.0125
+2026-01-14 09:24:40,265 INFO train_cfm: train step=160/6000 loss=5.8179 addr=5.7965 gen=0.0089 contrast=0.0125 step_s=0.089 avg_s=0.109
+step 160/6000 loss=5.8179 addr=5.7965 gen=0.0089 
+contrast=0.0125
+2026-01-14 09:24:42,045 INFO train_cfm: train step=180/6000 loss=5.9751 addr=5.9427 gen=0.0074 contrast=0.0250 step_s=0.089 avg_s=0.106
+step 180/6000 loss=5.9751 addr=5.9427 gen=0.0074 
+contrast=0.0250
+2026-01-14 09:24:43,823 INFO train_cfm: train step=200/6000 loss=5.7839 addr=5.7646 gen=0.0068 contrast=0.0125 step_s=0.089 avg_s=0.105
+step 200/6000 loss=5.7839 addr=5.7646 gen=0.0068 
+contrast=0.0125
+2026-01-14 09:24:45,610 INFO train_cfm: train step=220/6000 loss=5.5909 addr=5.5850 gen=0.0058 contrast=0.0000 step_s=0.089 avg_s=0.103
+step 220/6000 loss=5.5909 addr=5.5850 gen=0.0058 
+contrast=0.0000
+2026-01-14 09:24:47,398 INFO train_cfm: train step=240/6000 loss=5.8526 addr=5.8473 gen=0.0053 contrast=0.0000 step_s=0.090 avg_s=0.102
+step 240/6000 loss=5.8526 addr=5.8473 gen=0.0053 
+contrast=0.0000
+2026-01-14 09:24:49,205 INFO train_cfm: train step=260/6000 loss=5.8767 addr=5.8720 gen=0.0047 contrast=0.0000 step_s=0.090 avg_s=0.101
+step 260/6000 loss=5.8767 addr=5.8720 gen=0.0047 
+contrast=0.0000
+2026-01-14 09:24:50,999 INFO train_cfm: train step=280/6000 loss=5.1226 addr=5.0809 gen=0.0042 contrast=0.0375 step_s=0.090 avg_s=0.100
+step 280/6000 loss=5.1226 addr=5.0809 gen=0.0042 
+contrast=0.0375
+2026-01-14 09:24:52,768 INFO train_cfm: train step=300/6000 loss=5.6053 addr=5.5889 gen=0.0039 contrast=0.0125 step_s=0.089 avg_s=0.100
+step 300/6000 loss=5.6053 addr=5.5889 gen=0.0039 
+contrast=0.0125
+2026-01-14 09:24:52,943 INFO train_cfm: train step=302/6000 loss=5.5560 addr=5.5396 gen=0.0039 contrast=0.0125 step_s=0.086 avg_s=0.099
+step 302/6000 loss=5.5560 addr=5.5396 gen=0.0039 
+contrast=0.0125
+2026-01-14 09:24:54,539 INFO train_cfm: train step=320/6000 loss=5.5411 addr=5.5377 gen=0.0034 contrast=0.0000 step_s=0.089 avg_s=0.099
+step 320/6000 loss=5.5411 addr=5.5377 gen=0.0034 
+contrast=0.0000
+2026-01-14 09:24:56,328 INFO train_cfm: train step=340/6000 loss=5.5325 addr=5.5291 gen=0.0033 contrast=0.0000 step_s=0.090 avg_s=0.098
+step 340/6000 loss=5.5325 addr=5.5291 gen=0.0033 
+contrast=0.0000
+2026-01-14 09:24:58,112 INFO train_cfm: train step=360/6000 loss=5.5701 addr=5.5544 gen=0.0032 contrast=0.0125 step_s=0.089 avg_s=0.098
+step 360/6000 loss=5.5701 addr=5.5544 gen=0.0032 
+contrast=0.0125
+2026-01-14 09:24:59,919 INFO train_cfm: train step=380/6000 loss=5.1447 addr=5.1292 gen=0.0030 contrast=0.0125 step_s=0.090 avg_s=0.097
+step 380/6000 loss=5.1447 addr=5.1292 gen=0.0030 
+contrast=0.0125
+2026-01-14 09:25:01,693 INFO train_cfm: train step=400/6000 loss=5.1946 addr=5.1917 gen=0.0029 contrast=0.0000 step_s=0.089 avg_s=0.097
+step 400/6000 loss=5.1946 addr=5.1917 gen=0.0029 
+contrast=0.0000
+2026-01-14 09:25:03,460 INFO train_cfm: train step=420/6000 loss=4.8983 addr=4.8449 gen=0.0033 contrast=0.0500 step_s=0.088 avg_s=0.097
+step 420/6000 loss=4.8983 addr=4.8449 gen=0.0033 
+contrast=0.0500
+2026-01-14 09:25:05,254 INFO train_cfm: train step=440/6000 loss=5.2236 addr=5.2211 gen=0.0025 contrast=0.0000 step_s=0.090 avg_s=0.096
+step 440/6000 loss=5.2236 addr=5.2211 gen=0.0025 
+contrast=0.0000
+2026-01-14 09:25:07,064 INFO train_cfm: train step=460/6000 loss=5.4007 addr=5.3859 gen=0.0023 contrast=0.0125 step_s=0.091 avg_s=0.096
+step 460/6000 loss=5.4007 addr=5.3859 gen=0.0023 
+contrast=0.0125
+2026-01-14 09:25:08,892 INFO train_cfm: train step=480/6000 loss=5.2353 addr=5.2331 gen=0.0022 contrast=0.0000 step_s=0.091 avg_s=0.096
+step 480/6000 loss=5.2353 addr=5.2331 gen=0.0022 
+contrast=0.0000
+2026-01-14 09:25:10,686 INFO train_cfm: train step=500/6000 loss=4.8169 addr=4.8025 gen=0.0019 contrast=0.0125 step_s=0.089 avg_s=0.096
+step 500/6000 loss=4.8169 addr=4.8025 gen=0.0019 
+contrast=0.0125
+2026-01-14 09:25:12,465 INFO train_cfm: train step=520/6000 loss=4.8492 addr=4.8347 gen=0.0020 contrast=0.0125 step_s=0.089 avg_s=0.095
+step 520/6000 loss=4.8492 addr=4.8347 gen=0.0020 
+contrast=0.0125
+2026-01-14 09:25:14,258 INFO train_cfm: train step=540/6000 loss=5.1429 addr=5.1037 gen=0.0017 contrast=0.0375 step_s=0.089 avg_s=0.095
+step 540/6000 loss=5.1429 addr=5.1037 gen=0.0017 
+contrast=0.0375
+2026-01-14 09:25:16,058 INFO train_cfm: train step=560/6000 loss=4.8486 addr=4.8345 gen=0.0016 contrast=0.0125 step_s=0.090 avg_s=0.095
+step 560/6000 loss=4.8486 addr=4.8345 gen=0.0016 
+contrast=0.0125
+2026-01-14 09:25:17,835 INFO train_cfm: train step=580/6000 loss=5.5640 addr=5.5490 gen=0.0024 contrast=0.0125 step_s=0.089 avg_s=0.095
+step 580/6000 loss=5.5640 addr=5.5490 gen=0.0024 
+contrast=0.0125
+2026-01-14 09:25:19,639 INFO train_cfm: train step=600/6000 loss=5.0663 addr=5.0526 gen=0.0013 contrast=0.0125 step_s=0.091 avg_s=0.095
+step 600/6000 loss=5.0663 addr=5.0526 gen=0.0013 
+contrast=0.0125
+2026-01-14 09:25:21,429 INFO train_cfm: train step=620/6000 loss=4.8585 addr=4.8448 gen=0.0012 contrast=0.0125 step_s=0.089 avg_s=0.094
+step 620/6000 loss=4.8585 addr=4.8448 gen=0.0012 
+contrast=0.0125
+2026-01-14 09:25:22,963 INFO train_cfm: train step=637/6000 loss=4.8559 addr=4.8547 gen=0.0012 contrast=0.0000 step_s=0.090 avg_s=0.094
+step 637/6000 loss=4.8559 addr=4.8547 gen=0.0012 
+contrast=0.0000
+2026-01-14 09:25:23,237 INFO train_cfm: train step=640/6000 loss=4.7253 addr=4.6991 gen=0.0012 contrast=0.0250 step_s=0.091 avg_s=0.094
+step 640/6000 loss=4.7253 addr=4.6991 gen=0.0012 
+contrast=0.0250
+2026-01-14 09:25:25,034 INFO train_cfm: train step=660/6000 loss=5.2569 addr=5.2433 gen=0.0011 contrast=0.0125 step_s=0.090 avg_s=0.094
+step 660/6000 loss=5.2569 addr=5.2433 gen=0.0011 
+contrast=0.0125
+2026-01-14 09:25:26,812 INFO train_cfm: train step=680/6000 loss=5.4087 addr=5.4076 gen=0.0011 contrast=0.0000 step_s=0.089 avg_s=0.094
+step 680/6000 loss=5.4087 addr=5.4076 gen=0.0011 
+contrast=0.0000
+2026-01-14 09:25:28,603 INFO train_cfm: train step=700/6000 loss=5.0552 addr=5.0543 gen=0.0010 contrast=0.0000 step_s=0.090 avg_s=0.094
+step 700/6000 loss=5.0552 addr=5.0543 gen=0.0010 
+contrast=0.0000
+2026-01-14 09:25:30,410 INFO train_cfm: train step=720/6000 loss=4.5852 addr=4.5717 gen=0.0010 contrast=0.0125 step_s=0.090 avg_s=0.094
+step 720/6000 loss=4.5852 addr=4.5717 gen=0.0010 
+contrast=0.0125
+2026-01-14 09:25:32,204 INFO train_cfm: train step=740/6000 loss=5.0830 addr=5.0696 gen=0.0009 contrast=0.0125 step_s=0.090 avg_s=0.094
+step 740/6000 loss=5.0830 addr=5.0696 gen=0.0009 
+contrast=0.0125
+2026-01-14 09:25:33,997 INFO train_cfm: train step=760/6000 loss=4.8259 addr=4.8001 gen=0.0009 contrast=0.0250 step_s=0.090 avg_s=0.094
+step 760/6000 loss=4.8259 addr=4.8001 gen=0.0009 
+contrast=0.0250
+2026-01-14 09:25:35,787 INFO train_cfm: train step=780/6000 loss=4.5069 addr=4.4686 gen=0.0009 contrast=0.0375 step_s=0.089 avg_s=0.093
+step 780/6000 loss=4.5069 addr=4.4686 gen=0.0009 
+contrast=0.0375
+2026-01-14 09:25:37,583 INFO train_cfm: train step=800/6000 loss=5.1146 addr=5.1138 gen=0.0008 contrast=0.0000 step_s=0.090 avg_s=0.093
+step 800/6000 loss=5.1146 addr=5.1138 gen=0.0008 
+contrast=0.0000
+2026-01-14 09:25:39,360 INFO train_cfm: train step=820/6000 loss=5.1887 addr=5.1754 gen=0.0008 contrast=0.0125 step_s=0.089 avg_s=0.093
+step 820/6000 loss=5.1887 addr=5.1754 gen=0.0008 
+contrast=0.0125
+2026-01-14 09:25:41,155 INFO train_cfm: train step=840/6000 loss=5.2797 addr=5.2785 gen=0.0012 contrast=0.0000 step_s=0.089 avg_s=0.093
+step 840/6000 loss=5.2797 addr=5.2785 gen=0.0012 
+contrast=0.0000
+2026-01-14 09:25:42,939 INFO train_cfm: train step=860/6000 loss=4.5928 addr=4.5671 gen=0.0007 contrast=0.0250 step_s=0.089 avg_s=0.093
+step 860/6000 loss=4.5928 addr=4.5671 gen=0.0007 
+contrast=0.0250
+2026-01-14 09:25:44,735 INFO train_cfm: train step=880/6000 loss=4.6260 addr=4.5878 gen=0.0007 contrast=0.0375 step_s=0.090 avg_s=0.093
+step 880/6000 loss=4.6260 addr=4.5878 gen=0.0007 
+contrast=0.0375
+2026-01-14 09:25:46,510 INFO train_cfm: train step=900/6000 loss=5.1457 addr=5.1450 gen=0.0007 contrast=0.0000 step_s=0.089 avg_s=0.093
+step 900/6000 loss=5.1457 addr=5.1450 gen=0.0007 
+contrast=0.0000
+2026-01-14 09:25:48,302 INFO train_cfm: train step=920/6000 loss=4.3948 addr=4.3816 gen=0.0007 contrast=0.0125 step_s=0.089 avg_s=0.093
+step 920/6000 loss=4.3948 addr=4.3816 gen=0.0007 
+contrast=0.0125
+2026-01-14 09:25:50,099 INFO train_cfm: train step=940/6000 loss=4.8417 addr=4.8406 gen=0.0010 contrast=0.0000 step_s=0.090 avg_s=0.093
+step 940/6000 loss=4.8417 addr=4.8406 gen=0.0010 
+contrast=0.0000
+2026-01-14 09:25:51,893 INFO train_cfm: train step=960/6000 loss=4.7584 addr=4.7453 gen=0.0006 contrast=0.0125 step_s=0.090 avg_s=0.093
+step 960/6000 loss=4.7584 addr=4.7453 gen=0.0006 
+contrast=0.0125
+2026-01-14 09:25:52,966 INFO train_cfm: train step=972/6000 loss=4.7100 addr=4.7094 gen=0.0006 contrast=0.0000 step_s=0.089 avg_s=0.093
+step 972/6000 loss=4.7100 addr=4.7094 gen=0.0006 
+contrast=0.0000
+2026-01-14 09:25:53,688 INFO train_cfm: train step=980/6000 loss=5.4830 addr=5.4824 gen=0.0006 contrast=0.0000 step_s=0.091 avg_s=0.093
+step 980/6000 loss=5.4830 addr=5.4824 gen=0.0006 
+contrast=0.0000
+2026-01-14 09:25:55,480 INFO train_cfm: train step=1000/6000 loss=4.4555 addr=4.4423 gen=0.0007 contrast=0.0125 step_s=0.089 avg_s=0.093
+step 1000/6000 loss=4.4555 addr=4.4423 gen=0.0007
+contrast=0.0125
+2026-01-14 09:25:57,250 INFO train_cfm: train step=1020/6000 loss=4.5869 addr=4.5864 gen=0.0006 contrast=0.0000 step_s=0.089 avg_s=0.092
+step 1020/6000 loss=4.5869 addr=4.5864 gen=0.0006
+contrast=0.0000
+2026-01-14 09:25:59,020 INFO train_cfm: train step=1040/6000 loss=4.3279 addr=4.3274 gen=0.0005 contrast=0.0000 step_s=0.089 avg_s=0.092
+step 1040/6000 loss=4.3279 addr=4.3274 gen=0.0005
+contrast=0.0000
+2026-01-14 09:26:00,797 INFO train_cfm: train step=1060/6000 loss=4.6646 addr=4.6641 gen=0.0005 contrast=0.0000 step_s=0.089 avg_s=0.092
+step 1060/6000 loss=4.6646 addr=4.6641 gen=0.0005
+contrast=0.0000
+2026-01-14 09:26:02,585 INFO train_cfm: train step=1080/6000 loss=5.0857 addr=5.0727 gen=0.0005 contrast=0.0125 step_s=0.089 avg_s=0.092
+step 1080/6000 loss=5.0857 addr=5.0727 gen=0.0005
+contrast=0.0125
+2026-01-14 09:26:04,358 INFO train_cfm: train step=1100/6000 loss=4.5647 addr=4.5517 gen=0.0005 contrast=0.0125 step_s=0.089 avg_s=0.092
+step 1100/6000 loss=4.5647 addr=4.5517 gen=0.0005
+contrast=0.0125
+2026-01-14 09:26:06,136 INFO train_cfm: train step=1120/6000 loss=4.7200 addr=4.7195 gen=0.0005 contrast=0.0000 step_s=0.089 avg_s=0.092
+step 1120/6000 loss=4.7200 addr=4.7195 gen=0.0005
+contrast=0.0000
+2026-01-14 09:26:07,922 INFO train_cfm: train step=1140/6000 loss=4.3720 addr=4.3715 gen=0.0005 contrast=0.0000 step_s=0.089 avg_s=0.092
+step 1140/6000 loss=4.3720 addr=4.3715 gen=0.0005
+contrast=0.0000
+2026-01-14 09:26:09,709 INFO train_cfm: train step=1160/6000 loss=4.5107 addr=4.4978 gen=0.0005 contrast=0.0125 step_s=0.089 avg_s=0.092
+step 1160/6000 loss=4.5107 addr=4.4978 gen=0.0005
+contrast=0.0125
+2026-01-14 09:26:11,503 INFO train_cfm: train step=1180/6000 loss=4.2421 addr=4.2292 gen=0.0004 contrast=0.0125 step_s=0.090 avg_s=0.092
+step 1180/6000 loss=4.2421 addr=4.2292 gen=0.0004
+contrast=0.0125
+2026-01-14 09:26:13,303 INFO train_cfm: train step=1200/6000 loss=4.7286 addr=4.7156 gen=0.0004 contrast=0.0125 step_s=0.090 avg_s=0.092
+step 1200/6000 loss=4.7286 addr=4.7156 gen=0.0004
+contrast=0.0125
+2026-01-14 09:26:15,094 INFO train_cfm: train step=1220/6000 loss=4.3650 addr=4.3271 gen=0.0004 contrast=0.0375 step_s=0.090 avg_s=0.092
+step 1220/6000 loss=4.3650 addr=4.3271 gen=0.0004
+contrast=0.0375
+2026-01-14 09:26:16,869 INFO train_cfm: train step=1240/6000 loss=4.2078 addr=4.2074 gen=0.0004 contrast=0.0000 step_s=0.089 avg_s=0.092
+step 1240/6000 loss=4.2078 addr=4.2074 gen=0.0004
+contrast=0.0000
+2026-01-14 09:26:18,655 INFO train_cfm: train step=1260/6000 loss=4.4420 addr=4.4291 gen=0.0004 contrast=0.0125 step_s=0.089 avg_s=0.092
+step 1260/6000 loss=4.4420 addr=4.4291 gen=0.0004
+contrast=0.0125
+2026-01-14 09:26:20,441 INFO train_cfm: train step=1280/6000 loss=4.6449 addr=4.6195 gen=0.0004 contrast=0.0250 step_s=0.089 avg_s=0.092
+step 1280/6000 loss=4.6449 addr=4.6195 gen=0.0004
+contrast=0.0250
+2026-01-14 09:26:22,229 INFO train_cfm: train step=1300/6000 loss=4.5523 addr=4.5519 gen=0.0004 contrast=0.0000 step_s=0.089 avg_s=0.092
+step 1300/6000 loss=4.5523 addr=4.5519 gen=0.0004
+contrast=0.0000
+2026-01-14 09:26:23,042 INFO train_cfm: train step=1309/6000 loss=4.2962 addr=4.2833 gen=0.0004 contrast=0.0125 step_s=0.090 avg_s=0.092
+step 1309/6000 loss=4.2962 addr=4.2833 gen=0.0004
+contrast=0.0125
+2026-01-14 09:26:24,031 INFO train_cfm: train step=1320/6000 loss=4.0638 addr=4.0635 gen=0.0003 contrast=0.0000 step_s=0.090 avg_s=0.092
+step 1320/6000 loss=4.0638 addr=4.0635 gen=0.0003
+contrast=0.0000
+2026-01-14 09:26:25,818 INFO train_cfm: train step=1340/6000 loss=4.5505 addr=4.5501 gen=0.0003 contrast=0.0000 step_s=0.089 avg_s=0.092
+step 1340/6000 loss=4.5505 addr=4.5501 gen=0.0003
+contrast=0.0000
+2026-01-14 09:26:27,616 INFO train_cfm: train step=1360/6000 loss=4.4866 addr=4.4863 gen=0.0004 contrast=0.0000 step_s=0.090 avg_s=0.092
+step 1360/6000 loss=4.4866 addr=4.4863 gen=0.0004
+contrast=0.0000
+2026-01-14 09:26:29,395 INFO train_cfm: train step=1380/6000 loss=3.8758 addr=3.8754 gen=0.0003 contrast=0.0000 step_s=0.089 avg_s=0.092
+step 1380/6000 loss=3.8758 addr=3.8754 gen=0.0003
+contrast=0.0000
+2026-01-14 09:26:31,197 INFO train_cfm: train step=1400/6000 loss=4.1892 addr=4.1889 gen=0.0003 contrast=0.0000 step_s=0.090 avg_s=0.092
+step 1400/6000 loss=4.1892 addr=4.1889 gen=0.0003
+contrast=0.0000
+2026-01-14 09:26:32,988 INFO train_cfm: train step=1420/6000 loss=4.4662 addr=4.4408 gen=0.0003 contrast=0.0250 step_s=0.090 avg_s=0.092
+step 1420/6000 loss=4.4662 addr=4.4408 gen=0.0003
+contrast=0.0250
+2026-01-14 09:26:34,778 INFO train_cfm: train step=1440/6000 loss=4.5516 addr=4.5388 gen=0.0003 contrast=0.0125 step_s=0.090 avg_s=0.092
+step 1440/6000 loss=4.5516 addr=4.5388 gen=0.0003
+contrast=0.0125
+2026-01-14 09:26:36,563 INFO train_cfm: train step=1460/6000 loss=4.0550 addr=4.0547 gen=0.0003 contrast=0.0000 step_s=0.089 avg_s=0.092
+step 1460/6000 loss=4.0550 addr=4.0547 gen=0.0003
+contrast=0.0000
+2026-01-14 09:26:38,346 INFO train_cfm: train step=1480/6000 loss=4.2626 addr=4.2497 gen=0.0003 contrast=0.0125 step_s=0.089 avg_s=0.092
+step 1480/6000 loss=4.2626 addr=4.2497 gen=0.0003
+contrast=0.0125
+2026-01-14 09:26:40,137 INFO train_cfm: train step=1500/6000 loss=4.1865 addr=4.1487 gen=0.0003 contrast=0.0375 step_s=0.089 avg_s=0.091
+step 1500/6000 loss=4.1865 addr=4.1487 gen=0.0003
+contrast=0.0375
+2026-01-14 09:26:41,926 INFO train_cfm: train step=1520/6000 loss=4.2412 addr=4.2284 gen=0.0003 contrast=0.0125 step_s=0.089 avg_s=0.091
+step 1520/6000 loss=4.2412 addr=4.2284 gen=0.0003
+contrast=0.0125
+2026-01-14 09:26:43,739 INFO train_cfm: train step=1540/6000 loss=4.4942 addr=4.4939 gen=0.0003 contrast=0.0000 step_s=0.091 avg_s=0.091
+step 1540/6000 loss=4.4942 addr=4.4939 gen=0.0003
+contrast=0.0000
+2026-01-14 09:26:45,521 INFO train_cfm: train step=1560/6000 loss=3.7866 addr=3.7863 gen=0.0003 contrast=0.0000 step_s=0.089 avg_s=0.091
+step 1560/6000 loss=3.7866 addr=3.7863 gen=0.0003
+contrast=0.0000
+2026-01-14 09:26:47,313 INFO train_cfm: train step=1580/6000 loss=4.1425 addr=4.1298 gen=0.0003 contrast=0.0125 step_s=0.090 avg_s=0.091
+step 1580/6000 loss=4.1425 addr=4.1298 gen=0.0003
+contrast=0.0125
+2026-01-14 09:26:49,101 INFO train_cfm: train step=1600/6000 loss=4.2599 addr=4.2596 gen=0.0002 contrast=0.0000 step_s=0.089 avg_s=0.091
+step 1600/6000 loss=4.2599 addr=4.2596 gen=0.0002
+contrast=0.0000
+2026-01-14 09:26:50,900 INFO train_cfm: train step=1620/6000 loss=3.7066 addr=3.6689 gen=0.0002 contrast=0.0375 step_s=0.090 avg_s=0.091
+step 1620/6000 loss=3.7066 addr=3.6689 gen=0.0002
+contrast=0.0375
+2026-01-14 09:26:52,666 INFO train_cfm: train step=1640/6000 loss=3.8431 addr=3.8304 gen=0.0002 contrast=0.0125 step_s=0.089 avg_s=0.091
+step 1640/6000 loss=3.8431 addr=3.8304 gen=0.0002
+contrast=0.0125
+2026-01-14 09:26:53,115 INFO train_cfm: train step=1645/6000 loss=3.9392 addr=3.9390 gen=0.0002 contrast=0.0000 step_s=0.089 avg_s=0.091
+step 1645/6000 loss=3.9392 addr=3.9390 gen=0.0002
+contrast=0.0000
+2026-01-14 09:26:54,462 INFO train_cfm: train step=1660/6000 loss=3.6519 addr=3.6391 gen=0.0003 contrast=0.0125 step_s=0.090 avg_s=0.091
+step 1660/6000 loss=3.6519 addr=3.6391 gen=0.0003
+contrast=0.0125
+2026-01-14 09:26:56,249 INFO train_cfm: train step=1680/6000 loss=4.1417 addr=4.1414 gen=0.0002 contrast=0.0000 step_s=0.089 avg_s=0.091
+step 1680/6000 loss=4.1417 addr=4.1414 gen=0.0002
+contrast=0.0000
+2026-01-14 09:26:58,030 INFO train_cfm: train step=1700/6000 loss=3.8439 addr=3.8312 gen=0.0003 contrast=0.0125 step_s=0.089 avg_s=0.091
+step 1700/6000 loss=3.8439 addr=3.8312 gen=0.0003
+contrast=0.0125
+2026-01-14 09:26:59,821 INFO train_cfm: train step=1720/6000 loss=3.7949 addr=3.7821 gen=0.0003 contrast=0.0125 step_s=0.090 avg_s=0.091
+step 1720/6000 loss=3.7949 addr=3.7821 gen=0.0003
+contrast=0.0125
+2026-01-14 09:27:01,606 INFO train_cfm: train step=1740/6000 loss=4.1739 addr=4.1736 gen=0.0002 contrast=0.0000 step_s=0.089 avg_s=0.091
+step 1740/6000 loss=4.1739 addr=4.1736 gen=0.0002
+contrast=0.0000
+2026-01-14 09:27:03,412 INFO train_cfm: train step=1760/6000 loss=4.3764 addr=4.3637 gen=0.0002 contrast=0.0125 step_s=0.091 avg_s=0.091
+step 1760/6000 loss=4.3764 addr=4.3637 gen=0.0002
+contrast=0.0125
+2026-01-14 09:27:05,189 INFO train_cfm: train step=1780/6000 loss=4.0172 addr=4.0168 gen=0.0004 contrast=0.0000 step_s=0.088 avg_s=0.091
+step 1780/6000 loss=4.0172 addr=4.0168 gen=0.0004
+contrast=0.0000
+2026-01-14 09:27:06,975 INFO train_cfm: train step=1800/6000 loss=3.6515 addr=3.6513 gen=0.0002 contrast=0.0000 step_s=0.090 avg_s=0.091
+step 1800/6000 loss=3.6515 addr=3.6513 gen=0.0002
+contrast=0.0000
+2026-01-14 09:27:08,763 INFO train_cfm: train step=1820/6000 loss=3.6098 addr=3.5971 gen=0.0002 contrast=0.0125 step_s=0.089 avg_s=0.091
+step 1820/6000 loss=3.6098 addr=3.5971 gen=0.0002
+contrast=0.0125
+2026-01-14 09:27:10,527 INFO train_cfm: train step=1840/6000 loss=3.7266 addr=3.7139 gen=0.0002 contrast=0.0125 step_s=0.089 avg_s=0.091
+step 1840/6000 loss=3.7266 addr=3.7139 gen=0.0002
+contrast=0.0125
+2026-01-14 09:27:12,323 INFO train_cfm: train step=1860/6000 loss=3.7677 addr=3.7675 gen=0.0002 contrast=0.0000 step_s=0.090 avg_s=0.091
+step 1860/6000 loss=3.7677 addr=3.7675 gen=0.0002
+contrast=0.0000
+2026-01-14 09:27:14,108 INFO train_cfm: train step=1880/6000 loss=3.8851 addr=3.8725 gen=0.0002 contrast=0.0125 step_s=0.089 avg_s=0.091
+step 1880/6000 loss=3.8851 addr=3.8725 gen=0.0002
+contrast=0.0125
+2026-01-14 09:27:15,910 INFO train_cfm: train step=1900/6000 loss=3.3044 addr=3.3043 gen=0.0001 contrast=0.0000 step_s=0.090 avg_s=0.091
+step 1900/6000 loss=3.3044 addr=3.3043 gen=0.0001
+contrast=0.0000
+2026-01-14 09:27:17,716 INFO train_cfm: train step=1920/6000 loss=3.8940 addr=3.8939 gen=0.0001 contrast=0.0000 step_s=0.090 avg_s=0.091
+step 1920/6000 loss=3.8940 addr=3.8939 gen=0.0001
+contrast=0.0000
+2026-01-14 09:27:19,504 INFO train_cfm: train step=1940/6000 loss=3.5021 addr=3.5020 gen=0.0001 contrast=0.0000 step_s=0.090 avg_s=0.091
+step 1940/6000 loss=3.5021 addr=3.5020 gen=0.0001
+contrast=0.0000
+2026-01-14 09:27:21,298 INFO train_cfm: train step=1960/6000 loss=3.5818 addr=3.5817 gen=0.0001 contrast=0.0000 step_s=0.090 avg_s=0.091
+step 1960/6000 loss=3.5818 addr=3.5817 gen=0.0001
+contrast=0.0000
+2026-01-14 09:27:23,084 INFO train_cfm: train step=1980/6000 loss=3.6236 addr=3.5859 gen=0.0003 contrast=0.0375 step_s=0.090 avg_s=0.091
+step 1980/6000 loss=3.6236 addr=3.5859 gen=0.0003
+contrast=0.0375
+2026-01-14 09:27:23,179 INFO train_cfm: train step=1981/6000 loss=4.0160 addr=4.0034 gen=0.0001 contrast=0.0125 step_s=0.094 avg_s=0.091
+step 1981/6000 loss=4.0160 addr=4.0034 gen=0.0001
+contrast=0.0125
+2026-01-14 09:27:24,877 INFO train_cfm: train step=2000/6000 loss=3.3525 addr=3.3524 gen=0.0001 contrast=0.0000 step_s=0.089 avg_s=0.091
+step 2000/6000 loss=3.3525 addr=3.3524 gen=0.0001
+contrast=0.0000
+2026-01-14 09:27:26,672 INFO train_cfm: train step=2020/6000 loss=3.4719 addr=3.4718 gen=0.0001 contrast=0.0000 step_s=0.090 avg_s=0.091
+step 2020/6000 loss=3.4719 addr=3.4718 gen=0.0001
+contrast=0.0000
+2026-01-14 09:27:28,459 INFO train_cfm: train step=2040/6000 loss=3.5093 addr=3.5092 gen=0.0001 contrast=0.0000 step_s=0.089 avg_s=0.091
+step 2040/6000 loss=3.5093 addr=3.5092 gen=0.0001
+contrast=0.0000
+2026-01-14 09:27:30,232 INFO train_cfm: train step=2060/6000 loss=3.2836 addr=3.2834 gen=0.0001 contrast=0.0000 step_s=0.089 avg_s=0.091
+step 2060/6000 loss=3.2836 addr=3.2834 gen=0.0001
+contrast=0.0000
+2026-01-14 09:27:32,028 INFO train_cfm: train step=2080/6000 loss=3.8803 addr=3.8802 gen=0.0001 contrast=0.0000 step_s=0.090 avg_s=0.091
+step 2080/6000 loss=3.8803 addr=3.8802 gen=0.0001
+contrast=0.0000
+2026-01-14 09:27:33,824 INFO train_cfm: train step=2100/6000 loss=4.0306 addr=4.0305 gen=0.0001 contrast=0.0000 step_s=0.090 avg_s=0.091
+step 2100/6000 loss=4.0306 addr=4.0305 gen=0.0001
+contrast=0.0000
+2026-01-14 09:27:35,602 INFO train_cfm: train step=2120/6000 loss=3.6549 addr=3.6548 gen=0.0001 contrast=0.0000 step_s=0.089 avg_s=0.091
+step 2120/6000 loss=3.6549 addr=3.6548 gen=0.0001
+contrast=0.0000
+2026-01-14 09:27:37,411 INFO train_cfm: train step=2140/6000 loss=3.6599 addr=3.6473 gen=0.0001 contrast=0.0125 step_s=0.090 avg_s=0.091
+step 2140/6000 loss=3.6599 addr=3.6473 gen=0.0001
+contrast=0.0125
+2026-01-14 09:27:39,208 INFO train_cfm: train step=2160/6000 loss=3.3594 addr=3.3593 gen=0.0001 contrast=0.0000 step_s=0.090 avg_s=0.091
+step 2160/6000 loss=3.3594 addr=3.3593 gen=0.0001
+contrast=0.0000
+2026-01-14 09:27:40,983 INFO train_cfm: train step=2180/6000 loss=3.2195 addr=3.2194 gen=0.0001 contrast=0.0000 step_s=0.089 avg_s=0.091
+step 2180/6000 loss=3.2195 addr=3.2194 gen=0.0001
+contrast=0.0000
+2026-01-14 09:27:42,773 INFO train_cfm: train step=2200/6000 loss=2.8751 addr=2.8625 gen=0.0001 contrast=0.0125 step_s=0.090 avg_s=0.091
+step 2200/6000 loss=2.8751 addr=2.8625 gen=0.0001
+contrast=0.0125
+2026-01-14 09:27:44,555 INFO train_cfm: train step=2220/6000 loss=3.4633 addr=3.4507 gen=0.0001 contrast=0.0125 step_s=0.089 avg_s=0.091
+step 2220/6000 loss=3.4633 addr=3.4507 gen=0.0001
+contrast=0.0125
+2026-01-14 09:27:46,352 INFO train_cfm: train step=2240/6000 loss=3.0797 addr=3.0547 gen=0.0001 contrast=0.0250 step_s=0.090 avg_s=0.091
+step 2240/6000 loss=3.0797 addr=3.0547 gen=0.0001
+contrast=0.0250
+2026-01-14 09:27:48,135 INFO train_cfm: train step=2260/6000 loss=3.2499 addr=3.2374 gen=0.0001 contrast=0.0125 step_s=0.089 avg_s=0.091
+step 2260/6000 loss=3.2499 addr=3.2374 gen=0.0001
+contrast=0.0125
+2026-01-14 09:27:49,928 INFO train_cfm: train step=2280/6000 loss=3.2780 addr=3.2779 gen=0.0001 contrast=0.0000 step_s=0.090 avg_s=0.091
+step 2280/6000 loss=3.2780 addr=3.2779 gen=0.0001
+contrast=0.0000
+2026-01-14 09:27:51,697 INFO train_cfm: train step=2300/6000 loss=2.7848 addr=2.7847 gen=0.0001 contrast=0.0000 step_s=0.088 avg_s=0.091
+step 2300/6000 loss=2.7848 addr=2.7847 gen=0.0001
+contrast=0.0000
+2026-01-14 09:27:53,215 INFO train_cfm: train step=2317/6000 loss=2.9477 addr=2.9477 gen=0.0001 contrast=0.0000 step_s=0.089 avg_s=0.091
+step 2317/6000 loss=2.9477 addr=2.9477 gen=0.0001
+contrast=0.0000
+2026-01-14 09:27:53,485 INFO train_cfm: train step=2320/6000 loss=3.3438 addr=3.3062 gen=0.0001 contrast=0.0375 step_s=0.089 avg_s=0.091
+step 2320/6000 loss=3.3438 addr=3.3062 gen=0.0001
+contrast=0.0375
+2026-01-14 09:27:55,265 INFO train_cfm: train step=2340/6000 loss=3.2493 addr=3.2367 gen=0.0001 contrast=0.0125 step_s=0.089 avg_s=0.091
+step 2340/6000 loss=3.2493 addr=3.2367 gen=0.0001
+contrast=0.0125
+2026-01-14 09:27:57,050 INFO train_cfm: train step=2360/6000 loss=2.8572 addr=2.8321 gen=0.0001 contrast=0.0250 step_s=0.089 avg_s=0.091
+step 2360/6000 loss=2.8572 addr=2.8321 gen=0.0001
+contrast=0.0250
+2026-01-14 09:27:58,830 INFO train_cfm: train step=2380/6000 loss=3.2060 addr=3.2059 gen=0.0001 contrast=0.0000 step_s=0.089 avg_s=0.091
+step 2380/6000 loss=3.2060 addr=3.2059 gen=0.0001
+contrast=0.0000
+2026-01-14 09:28:00,606 INFO train_cfm: train step=2400/6000 loss=2.9947 addr=2.9821 gen=0.0001 contrast=0.0125 step_s=0.089 avg_s=0.091
+step 2400/6000 loss=2.9947 addr=2.9821 gen=0.0001
+contrast=0.0125
+2026-01-14 09:28:02,383 INFO train_cfm: train step=2420/6000 loss=3.3277 addr=3.2902 gen=0.0001 contrast=0.0375 step_s=0.089 avg_s=0.091
+step 2420/6000 loss=3.3277 addr=3.2902 gen=0.0001
+contrast=0.0375
+2026-01-14 09:28:04,179 INFO train_cfm: train step=2440/6000 loss=2.9978 addr=2.9852 gen=0.0001 contrast=0.0125 step_s=0.090 avg_s=0.091
+step 2440/6000 loss=2.9978 addr=2.9852 gen=0.0001
+contrast=0.0125
+2026-01-14 09:28:05,977 INFO train_cfm: train step=2460/6000 loss=2.9065 addr=2.9064 gen=0.0000 contrast=0.0000 step_s=0.090 avg_s=0.091
+step 2460/6000 loss=2.9065 addr=2.9064 gen=0.0000
+contrast=0.0000
+2026-01-14 09:28:07,745 INFO train_cfm: train step=2480/6000 loss=2.9325 addr=2.9324 gen=0.0001 contrast=0.0000 step_s=0.088 avg_s=0.091
+step 2480/6000 loss=2.9325 addr=2.9324 gen=0.0001
+contrast=0.0000
+2026-01-14 09:28:09,537 INFO train_cfm: train step=2500/6000 loss=2.6210 addr=2.6085 gen=0.0001 contrast=0.0125 step_s=0.089 avg_s=0.091
+step 2500/6000 loss=2.6210 addr=2.6085 gen=0.0001
+contrast=0.0125
+2026-01-14 09:28:11,337 INFO train_cfm: train step=2520/6000 loss=2.8055 addr=2.8055 gen=0.0001 contrast=0.0000 step_s=0.090 avg_s=0.091
+step 2520/6000 loss=2.8055 addr=2.8055 gen=0.0001
+contrast=0.0000
+2026-01-14 09:28:13,101 INFO train_cfm: train step=2540/6000 loss=2.7032 addr=2.7032 gen=0.0001 contrast=0.0000 step_s=0.088 avg_s=0.091
+step 2540/6000 loss=2.7032 addr=2.7032 gen=0.0001
+contrast=0.0000
+2026-01-14 09:28:14,904 INFO train_cfm: train step=2560/6000 loss=2.6084 addr=2.5833 gen=0.0000 contrast=0.0250 step_s=0.090 avg_s=0.091
+step 2560/6000 loss=2.6084 addr=2.5833 gen=0.0000
+contrast=0.0250
+2026-01-14 09:28:16,691 INFO train_cfm: train step=2580/6000 loss=2.6030 addr=2.5905 gen=0.0000 contrast=0.0125 step_s=0.089 avg_s=0.091
+step 2580/6000 loss=2.6030 addr=2.5905 gen=0.0000
+contrast=0.0125
+2026-01-14 09:28:18,495 INFO train_cfm: train step=2600/6000 loss=2.6160 addr=2.6159 gen=0.0000 contrast=0.0000 step_s=0.090 avg_s=0.091
+step 2600/6000 loss=2.6160 addr=2.6159 gen=0.0000
+contrast=0.0000
+2026-01-14 09:28:20,281 INFO train_cfm: train step=2620/6000 loss=2.4789 addr=2.4789 gen=0.0000 contrast=0.0000 step_s=0.089 avg_s=0.091
+step 2620/6000 loss=2.4789 addr=2.4789 gen=0.0000
+contrast=0.0000
+2026-01-14 09:28:22,043 INFO train_cfm: train step=2640/6000 loss=2.2959 addr=2.2583 gen=0.0000 contrast=0.0375 step_s=0.089 avg_s=0.091
+step 2640/6000 loss=2.2959 addr=2.2583 gen=0.0000
+contrast=0.0375
+2026-01-14 09:28:23,299 INFO train_cfm: train step=2654/6000 loss=2.3845 addr=2.3595 gen=0.0001 contrast=0.0250 step_s=0.089 avg_s=0.091
+step 2654/6000 loss=2.3845 addr=2.3595 gen=0.0001
+contrast=0.0250
+2026-01-14 09:28:23,843 INFO train_cfm: train step=2660/6000 loss=2.5169 addr=2.5169 gen=0.0000 contrast=0.0000 step_s=0.091 avg_s=0.091
+step 2660/6000 loss=2.5169 addr=2.5169 gen=0.0000
+contrast=0.0000
+2026-01-14 09:28:25,640 INFO train_cfm: train step=2680/6000 loss=2.7806 addr=2.7805 gen=0.0001 contrast=0.0000 step_s=0.090 avg_s=0.091
+step 2680/6000 loss=2.7806 addr=2.7805 gen=0.0001
+contrast=0.0000
+2026-01-14 09:28:27,437 INFO train_cfm: train step=2700/6000 loss=2.4108 addr=2.3983 gen=0.0000 contrast=0.0125 step_s=0.090 avg_s=0.091
+step 2700/6000 loss=2.4108 addr=2.3983 gen=0.0000
+contrast=0.0125
+2026-01-14 09:28:29,231 INFO train_cfm: train step=2720/6000 loss=2.3839 addr=2.3838 gen=0.0000 contrast=0.0000 step_s=0.090 avg_s=0.091
+step 2720/6000 loss=2.3839 addr=2.3838 gen=0.0000
+contrast=0.0000
+2026-01-14 09:28:31,017 INFO train_cfm: train step=2740/6000 loss=2.3808 addr=2.3807 gen=0.0000 contrast=0.0000 step_s=0.090 avg_s=0.091
+step 2740/6000 loss=2.3808 addr=2.3807 gen=0.0000
+contrast=0.0000
+2026-01-14 09:28:32,797 INFO train_cfm: train step=2760/6000 loss=1.7410 addr=1.7285 gen=0.0000 contrast=0.0125 step_s=0.089 avg_s=0.091
+step 2760/6000 loss=1.7410 addr=1.7285 gen=0.0000
+contrast=0.0125
+2026-01-14 09:28:34,574 INFO train_cfm: train step=2780/6000 loss=2.2787 addr=2.2661 gen=0.0000 contrast=0.0125 step_s=0.089 avg_s=0.091
+step 2780/6000 loss=2.2787 addr=2.2661 gen=0.0000
+contrast=0.0125
+2026-01-14 09:28:36,354 INFO train_cfm: train step=2800/6000 loss=2.2910 addr=2.2784 gen=0.0000 contrast=0.0125 step_s=0.089 avg_s=0.091
+step 2800/6000 loss=2.2910 addr=2.2784 gen=0.0000
+contrast=0.0125
+2026-01-14 09:28:38,151 INFO train_cfm: train step=2820/6000 loss=1.9468 addr=1.9468 gen=0.0000 contrast=0.0000 step_s=0.090 avg_s=0.091
+step 2820/6000 loss=1.9468 addr=1.9468 gen=0.0000
+contrast=0.0000
+2026-01-14 09:28:39,947 INFO train_cfm: train step=2840/6000 loss=2.8568 addr=2.8067 gen=0.0000 contrast=0.0500 step_s=0.090 avg_s=0.091
+step 2840/6000 loss=2.8568 addr=2.8067 gen=0.0000
+contrast=0.0500
+2026-01-14 09:28:41,714 INFO train_cfm: train step=2860/6000 loss=1.8122 addr=1.8122 gen=0.0000 contrast=0.0000 step_s=0.088 avg_s=0.090
+step 2860/6000 loss=1.8122 addr=1.8122 gen=0.0000
+contrast=0.0000
+2026-01-14 09:28:43,506 INFO train_cfm: train step=2880/6000 loss=1.8057 addr=1.7931 gen=0.0000 contrast=0.0125 step_s=0.089 avg_s=0.090
+step 2880/6000 loss=1.8057 addr=1.7931 gen=0.0000
+contrast=0.0125
+2026-01-14 09:28:45,304 INFO train_cfm: train step=2900/6000 loss=1.9782 addr=1.9781 gen=0.0000 contrast=0.0000 step_s=0.090 avg_s=0.090
+step 2900/6000 loss=1.9782 addr=1.9781 gen=0.0000
+contrast=0.0000
+2026-01-14 09:28:47,090 INFO train_cfm: train step=2920/6000 loss=2.0984 addr=2.0858 gen=0.0000 contrast=0.0125 step_s=0.089 avg_s=0.090
+step 2920/6000 loss=2.0984 addr=2.0858 gen=0.0000
+contrast=0.0125
+2026-01-14 09:28:48,879 INFO train_cfm: train step=2940/6000 loss=1.8504 addr=1.8378 gen=0.0000 contrast=0.0125 step_s=0.090 avg_s=0.090
+step 2940/6000 loss=1.8504 addr=1.8378 gen=0.0000
+contrast=0.0125
+2026-01-14 09:28:50,664 INFO train_cfm: train step=2960/6000 loss=2.0381 addr=2.0381 gen=0.0000 contrast=0.0000 step_s=0.089 avg_s=0.090
+step 2960/6000 loss=2.0381 addr=2.0381 gen=0.0000
+contrast=0.0000
+2026-01-14 09:28:52,452 INFO train_cfm: train step=2980/6000 loss=1.8060 addr=1.8059 gen=0.0000 contrast=0.0000 step_s=0.090 avg_s=0.090
+step 2980/6000 loss=1.8060 addr=1.8059 gen=0.0000
+contrast=0.0000
+2026-01-14 09:28:53,340 INFO train_cfm: train step=2990/6000 loss=1.7606 addr=1.7480 gen=0.0000 contrast=0.0125 step_s=0.089 avg_s=0.090
+step 2990/6000 loss=1.7606 addr=1.7480 gen=0.0000
+contrast=0.0125
+2026-01-14 09:28:54,236 INFO train_cfm: train step=3000/6000 loss=1.9530 addr=1.9529 gen=0.0001 contrast=0.0000 step_s=0.090 avg_s=0.090
+step 3000/6000 loss=1.9530 addr=1.9529 gen=0.0001
+contrast=0.0000
+2026-01-14 09:28:56,023 INFO train_cfm: train step=3020/6000 loss=2.0077 addr=2.0077 gen=0.0001 contrast=0.0000 step_s=0.089 avg_s=0.090
+step 3020/6000 loss=2.0077 addr=2.0077 gen=0.0001
+contrast=0.0000
+2026-01-14 09:28:57,814 INFO train_cfm: train step=3040/6000 loss=1.8972 addr=1.8721 gen=0.0000 contrast=0.0250 step_s=0.090 avg_s=0.090
+step 3040/6000 loss=1.8972 addr=1.8721 gen=0.0000
+contrast=0.0250
+2026-01-14 09:28:59,613 INFO train_cfm: train step=3060/6000 loss=1.6703 addr=1.6702 gen=0.0000 contrast=0.0000 step_s=0.090 avg_s=0.090
+step 3060/6000 loss=1.6703 addr=1.6702 gen=0.0000
+contrast=0.0000
+2026-01-14 09:29:01,394 INFO train_cfm: train step=3080/6000 loss=1.6498 addr=1.6372 gen=0.0000 contrast=0.0125 step_s=0.089 avg_s=0.090
+step 3080/6000 loss=1.6498 addr=1.6372 gen=0.0000
+contrast=0.0125
+2026-01-14 09:29:03,173 INFO train_cfm: train step=3100/6000 loss=1.8109 addr=1.8109 gen=0.0000 contrast=0.0000 step_s=0.089 avg_s=0.090
+step 3100/6000 loss=1.8109 addr=1.8109 gen=0.0000
+contrast=0.0000
+2026-01-14 09:29:04,979 INFO train_cfm: train step=3120/6000 loss=2.0746 addr=2.0621 gen=0.0000 contrast=0.0125 step_s=0.090 avg_s=0.090
+step 3120/6000 loss=2.0746 addr=2.0621 gen=0.0000
+contrast=0.0125
+2026-01-14 09:29:06,758 INFO train_cfm: train step=3140/6000 loss=1.7263 addr=1.7262 gen=0.0000 contrast=0.0000 step_s=0.089 avg_s=0.090
+step 3140/6000 loss=1.7263 addr=1.7262 gen=0.0000
+contrast=0.0000
+2026-01-14 09:29:08,541 INFO train_cfm: train step=3160/6000 loss=2.1793 addr=2.1793 gen=0.0000 contrast=0.0000 step_s=0.089 avg_s=0.090
+step 3160/6000 loss=2.1793 addr=2.1793 gen=0.0000
+contrast=0.0000
+2026-01-14 09:29:10,319 INFO train_cfm: train step=3180/6000 loss=1.3340 addr=1.3340 gen=0.0000 contrast=0.0000 step_s=0.089 avg_s=0.090
+step 3180/6000 loss=1.3340 addr=1.3340 gen=0.0000
+contrast=0.0000
+2026-01-14 09:29:12,082 INFO train_cfm: train step=3200/6000 loss=1.5864 addr=1.5738 gen=0.0000 contrast=0.0125 step_s=0.088 avg_s=0.090
+step 3200/6000 loss=1.5864 addr=1.5738 gen=0.0000
+contrast=0.0125
+2026-01-14 09:29:13,884 INFO train_cfm: train step=3220/6000 loss=1.3835 addr=1.3584 gen=0.0000 contrast=0.0250 step_s=0.090 avg_s=0.090
+step 3220/6000 loss=1.3835 addr=1.3584 gen=0.0000
+contrast=0.0250
+2026-01-14 09:29:15,647 INFO train_cfm: train step=3240/6000 loss=1.4753 addr=1.4502 gen=0.0000 contrast=0.0250 step_s=0.088 avg_s=0.090
+step 3240/6000 loss=1.4753 addr=1.4502 gen=0.0000
+contrast=0.0250
+2026-01-14 09:29:17,429 INFO train_cfm: train step=3260/6000 loss=1.7038 addr=1.7037 gen=0.0000 contrast=0.0000 step_s=0.089 avg_s=0.090
+step 3260/6000 loss=1.7038 addr=1.7037 gen=0.0000
+contrast=0.0000
+2026-01-14 09:29:19,208 INFO train_cfm: train step=3280/6000 loss=1.4753 addr=1.4753 gen=0.0000 contrast=0.0000 step_s=0.089 avg_s=0.090
+step 3280/6000 loss=1.4753 addr=1.4753 gen=0.0000
+contrast=0.0000
+2026-01-14 09:29:21,016 INFO train_cfm: train step=3300/6000 loss=1.3451 addr=1.3451 gen=0.0000 contrast=0.0000 step_s=0.090 avg_s=0.090
+step 3300/6000 loss=1.3451 addr=1.3451 gen=0.0000
+contrast=0.0000
+2026-01-14 09:29:22,815 INFO train_cfm: train step=3320/6000 loss=1.7484 addr=1.7359 gen=0.0000 contrast=0.0125 step_s=0.090 avg_s=0.090
+step 3320/6000 loss=1.7484 addr=1.7359 gen=0.0000
+contrast=0.0125
+2026-01-14 09:29:23,337 INFO train_cfm: train step=3331/6000 loss=1.1365 addr=1.1364 gen=0.0000 contrast=0.0000 step_s=0.049 avg_s=0.090
+step 3331/6000 loss=1.1365 addr=1.1364 gen=0.0000
+contrast=0.0000
+2026-01-14 09:29:23,793 INFO train_cfm: train step=3340/6000 loss=1.6456 addr=1.6205 gen=0.0000 contrast=0.0250 step_s=0.051 avg_s=0.090
+step 3340/6000 loss=1.6456 addr=1.6205 gen=0.0000
+contrast=0.0250
+2026-01-14 09:29:24,868 INFO train_cfm: train step=3360/6000 loss=1.3474 addr=1.3474 gen=0.0000 contrast=0.0000 step_s=0.054 avg_s=0.090
+step 3360/6000 loss=1.3474 addr=1.3474 gen=0.0000
+contrast=0.0000
+2026-01-14 09:29:25,940 INFO train_cfm: train step=3380/6000 loss=1.2612 addr=1.2236 gen=0.0000 contrast=0.0375 step_s=0.054 avg_s=0.090
+step 3380/6000 loss=1.2612 addr=1.2236 gen=0.0000
+contrast=0.0375
+2026-01-14 09:29:27,013 INFO train_cfm: train step=3400/6000 loss=1.2824 addr=1.2824 gen=0.0000 contrast=0.0000 step_s=0.054 avg_s=0.089
+step 3400/6000 loss=1.2824 addr=1.2824 gen=0.0000
+contrast=0.0000
+2026-01-14 09:29:28,096 INFO train_cfm: train step=3420/6000 loss=1.3253 addr=1.3253 gen=0.0000 contrast=0.0000 step_s=0.054 avg_s=0.089
+step 3420/6000 loss=1.3253 addr=1.3253 gen=0.0000
+contrast=0.0000
+2026-01-14 09:29:29,157 INFO train_cfm: train step=3440/6000 loss=1.3681 addr=1.3681 gen=0.0000 contrast=0.0000 step_s=0.053 avg_s=0.089
+step 3440/6000 loss=1.3681 addr=1.3681 gen=0.0000
+contrast=0.0000
+2026-01-14 09:29:30,225 INFO train_cfm: train step=3460/6000 loss=0.9622 addr=0.9622 gen=0.0000 contrast=0.0000 step_s=0.053 avg_s=0.089
+step 3460/6000 loss=0.9622 addr=0.9622 gen=0.0000
+contrast=0.0000
+2026-01-14 09:29:31,309 INFO train_cfm: train step=3480/6000 loss=1.3905 addr=1.3905 gen=0.0000 contrast=0.0000 step_s=0.054 avg_s=0.089
+step 3480/6000 loss=1.3905 addr=1.3905 gen=0.0000
+contrast=0.0000
+2026-01-14 09:29:32,399 INFO train_cfm: train step=3500/6000 loss=1.2699 addr=1.2698 gen=0.0000 contrast=0.0000 step_s=0.055 avg_s=0.088
+step 3500/6000 loss=1.2699 addr=1.2698 gen=0.0000
+contrast=0.0000
+2026-01-14 09:29:33,485 INFO train_cfm: train step=3520/6000 loss=0.9056 addr=0.8931 gen=0.0000 contrast=0.0125 step_s=0.054 avg_s=0.088
+step 3520/6000 loss=0.9056 addr=0.8931 gen=0.0000
+contrast=0.0125
+2026-01-14 09:29:34,552 INFO train_cfm: train step=3540/6000 loss=0.8499 addr=0.8499 gen=0.0000 contrast=0.0000 step_s=0.053 avg_s=0.088
+step 3540/6000 loss=0.8499 addr=0.8499 gen=0.0000
+contrast=0.0000
+2026-01-14 09:29:35,637 INFO train_cfm: train step=3560/6000 loss=0.6470 addr=0.6220 gen=0.0000 contrast=0.0250 step_s=0.054 avg_s=0.088
+step 3560/6000 loss=0.6470 addr=0.6220 gen=0.0000
+contrast=0.0250
+2026-01-14 09:29:36,705 INFO train_cfm: train step=3580/6000 loss=1.0246 addr=1.0246 gen=0.0000 contrast=0.0000 step_s=0.053 avg_s=0.088
+step 3580/6000 loss=1.0246 addr=1.0246 gen=0.0000
+contrast=0.0000
+2026-01-14 09:29:37,802 INFO train_cfm: train step=3600/6000 loss=1.0691 addr=1.0566 gen=0.0000 contrast=0.0125 step_s=0.055 avg_s=0.087
+step 3600/6000 loss=1.0691 addr=1.0566 gen=0.0000
+contrast=0.0125
+2026-01-14 09:29:38,896 INFO train_cfm: train step=3620/6000 loss=1.0068 addr=0.9943 gen=0.0000 contrast=0.0125 step_s=0.055 avg_s=0.087
+step 3620/6000 loss=1.0068 addr=0.9943 gen=0.0000
+contrast=0.0125
+2026-01-14 09:29:39,970 INFO train_cfm: train step=3640/6000 loss=0.9689 addr=0.9689 gen=0.0000 contrast=0.0000 step_s=0.054 avg_s=0.087
+step 3640/6000 loss=0.9689 addr=0.9689 gen=0.0000
+contrast=0.0000
+2026-01-14 09:29:41,050 INFO train_cfm: train step=3660/6000 loss=1.0032 addr=0.9906 gen=0.0000 contrast=0.0125 step_s=0.054 avg_s=0.087
+step 3660/6000 loss=1.0032 addr=0.9906 gen=0.0000
+contrast=0.0125
+2026-01-14 09:29:42,122 INFO train_cfm: train step=3680/6000 loss=0.8652 addr=0.8652 gen=0.0000 contrast=0.0000 step_s=0.054 avg_s=0.087
+step 3680/6000 loss=0.8652 addr=0.8652 gen=0.0000
+contrast=0.0000
+2026-01-14 09:29:43,192 INFO train_cfm: train step=3700/6000 loss=0.8598 addr=0.8473 gen=0.0000 contrast=0.0125 step_s=0.053 avg_s=0.087
+step 3700/6000 loss=0.8598 addr=0.8473 gen=0.0000
+contrast=0.0125
+2026-01-14 09:29:44,266 INFO train_cfm: train step=3720/6000 loss=1.3716 addr=1.3716 gen=0.0000 contrast=0.0000 step_s=0.054 avg_s=0.086
+step 3720/6000 loss=1.3716 addr=1.3716 gen=0.0000
+contrast=0.0000
+2026-01-14 09:29:45,345 INFO train_cfm: train step=3740/6000 loss=0.8777 addr=0.8651 gen=0.0000 contrast=0.0125 step_s=0.054 avg_s=0.086
+step 3740/6000 loss=0.8777 addr=0.8651 gen=0.0000
+contrast=0.0125
+2026-01-14 09:29:46,420 INFO train_cfm: train step=3760/6000 loss=0.9030 addr=0.8905 gen=0.0000 contrast=0.0125 step_s=0.054 avg_s=0.086
+step 3760/6000 loss=0.9030 addr=0.8905 gen=0.0000
+contrast=0.0125
+2026-01-14 09:29:47,508 INFO train_cfm: train step=3780/6000 loss=0.8496 addr=0.8371 gen=0.0000 contrast=0.0125 step_s=0.054 avg_s=0.086
+step 3780/6000 loss=0.8496 addr=0.8371 gen=0.0000
+contrast=0.0125
+2026-01-14 09:29:48,597 INFO train_cfm: train step=3800/6000 loss=0.8148 addr=0.8023 gen=0.0000 contrast=0.0125 step_s=0.054 avg_s=0.086
+step 3800/6000 loss=0.8148 addr=0.8023 gen=0.0000
+contrast=0.0125
+2026-01-14 09:29:49,665 INFO train_cfm: train step=3820/6000 loss=0.8767 addr=0.8642 gen=0.0000 contrast=0.0125 step_s=0.053 avg_s=0.086
+step 3820/6000 loss=0.8767 addr=0.8642 gen=0.0000
+contrast=0.0125
+2026-01-14 09:29:50,742 INFO train_cfm: train step=3840/6000 loss=1.0419 addr=1.0419 gen=0.0000 contrast=0.0000 step_s=0.054 avg_s=0.085
+step 3840/6000 loss=1.0419 addr=1.0419 gen=0.0000
+contrast=0.0000
+2026-01-14 09:29:51,808 INFO train_cfm: train step=3860/6000 loss=0.8224 addr=0.7974 gen=0.0000 contrast=0.0250 step_s=0.053 avg_s=0.085
+step 3860/6000 loss=0.8224 addr=0.7974 gen=0.0000
+contrast=0.0250
+2026-01-14 09:29:52,893 INFO train_cfm: train step=3880/6000 loss=0.7351 addr=0.7351 gen=0.0000 contrast=0.0000 step_s=0.054 avg_s=0.085
+step 3880/6000 loss=0.7351 addr=0.7351 gen=0.0000
+contrast=0.0000
+2026-01-14 09:29:53,384 INFO train_cfm: train step=3889/6000 loss=0.9175 addr=0.9050 gen=0.0000 contrast=0.0125 step_s=0.055 avg_s=0.085
+step 3889/6000 loss=0.9175 addr=0.9050 gen=0.0000
+contrast=0.0125
+2026-01-14 09:29:53,975 INFO train_cfm: train step=3900/6000 loss=0.6760 addr=0.6635 gen=0.0000 contrast=0.0125 step_s=0.054 avg_s=0.085
+step 3900/6000 loss=0.6760 addr=0.6635 gen=0.0000
+contrast=0.0125
+2026-01-14 09:29:55,033 INFO train_cfm: train step=3920/6000 loss=0.5844 addr=0.5719 gen=0.0000 contrast=0.0125 step_s=0.053 avg_s=0.085
+step 3920/6000 loss=0.5844 addr=0.5719 gen=0.0000
+contrast=0.0125
+2026-01-14 09:29:56,092 INFO train_cfm: train step=3940/6000 loss=0.6246 addr=0.6121 gen=0.0000 contrast=0.0125 step_s=0.053 avg_s=0.085
+step 3940/6000 loss=0.6246 addr=0.6121 gen=0.0000
+contrast=0.0125
+2026-01-14 09:29:57,146 INFO train_cfm: train step=3960/6000 loss=1.2639 addr=1.2389 gen=0.0000 contrast=0.0250 step_s=0.053 avg_s=0.084
+step 3960/6000 loss=1.2639 addr=1.2389 gen=0.0000
+contrast=0.0250
+2026-01-14 09:29:58,204 INFO train_cfm: train step=3980/6000 loss=1.2255 addr=1.2255 gen=0.0000 contrast=0.0000 step_s=0.053 avg_s=0.084
+step 3980/6000 loss=1.2255 addr=1.2255 gen=0.0000
+contrast=0.0000
+2026-01-14 09:29:59,286 INFO train_cfm: train step=4000/6000 loss=0.8671 addr=0.8421 gen=0.0000 contrast=0.0250 step_s=0.054 avg_s=0.084
+step 4000/6000 loss=0.8671 addr=0.8421 gen=0.0000
+contrast=0.0250
+2026-01-14 09:30:00,340 INFO train_cfm: train step=4020/6000 loss=0.6516 addr=0.6391 gen=0.0000 contrast=0.0125 step_s=0.053 avg_s=0.084
+step 4020/6000 loss=0.6516 addr=0.6391 gen=0.0000
+contrast=0.0125
+2026-01-14 09:30:01,393 INFO train_cfm: train step=4040/6000 loss=0.4800 addr=0.4674 gen=0.0000 contrast=0.0125 step_s=0.053 avg_s=0.084
+step 4040/6000 loss=0.4800 addr=0.4674 gen=0.0000
+contrast=0.0125
+2026-01-14 09:30:02,448 INFO train_cfm: train step=4060/6000 loss=0.6396 addr=0.6270 gen=0.0001 contrast=0.0125 step_s=0.053 avg_s=0.084
+step 4060/6000 loss=0.6396 addr=0.6270 gen=0.0001
+contrast=0.0125
+2026-01-14 09:30:03,418 INFO train_cfm: train step=4080/6000 loss=0.4722 addr=0.4722 gen=0.0000 contrast=0.0000 step_s=0.048 avg_s=0.083
+step 4080/6000 loss=0.4722 addr=0.4722 gen=0.0000
+contrast=0.0000
+2026-01-14 09:30:04,433 INFO train_cfm: train step=4100/6000 loss=0.5130 addr=0.5129 gen=0.0000 contrast=0.0000 step_s=0.051 avg_s=0.083
+step 4100/6000 loss=0.5130 addr=0.5129 gen=0.0000
+contrast=0.0000
+2026-01-14 09:30:05,488 INFO train_cfm: train step=4120/6000 loss=0.7168 addr=0.7043 gen=0.0000 contrast=0.0125 step_s=0.053 avg_s=0.083
+step 4120/6000 loss=0.7168 addr=0.7043 gen=0.0000
+contrast=0.0125
+2026-01-14 09:30:06,543 INFO train_cfm: train step=4140/6000 loss=0.5190 addr=0.5065 gen=0.0000 contrast=0.0125 step_s=0.053 avg_s=0.083
+step 4140/6000 loss=0.5190 addr=0.5065 gen=0.0000
+contrast=0.0125
+2026-01-14 09:30:07,600 INFO train_cfm: train step=4160/6000 loss=0.4934 addr=0.4559 gen=0.0000 contrast=0.0375 step_s=0.053 avg_s=0.083
+step 4160/6000 loss=0.4934 addr=0.4559 gen=0.0000
+contrast=0.0375
+2026-01-14 09:30:08,692 INFO train_cfm: train step=4180/6000 loss=0.6646 addr=0.6646 gen=0.0000 contrast=0.0000 step_s=0.055 avg_s=0.083
+step 4180/6000 loss=0.6646 addr=0.6646 gen=0.0000
+contrast=0.0000
+2026-01-14 09:30:09,748 INFO train_cfm: train step=4200/6000 loss=0.5487 addr=0.5487 gen=0.0000 contrast=0.0000 step_s=0.053 avg_s=0.083
+step 4200/6000 loss=0.5487 addr=0.5487 gen=0.0000
+contrast=0.0000
+2026-01-14 09:30:10,805 INFO train_cfm: train step=4220/6000 loss=0.6695 addr=0.6695 gen=0.0000 contrast=0.0000 step_s=0.053 avg_s=0.082
+step 4220/6000 loss=0.6695 addr=0.6695 gen=0.0000
+contrast=0.0000
+2026-01-14 09:30:11,881 INFO train_cfm: train step=4240/6000 loss=0.6765 addr=0.6515 gen=0.0000 contrast=0.0250 step_s=0.054 avg_s=0.082
+step 4240/6000 loss=0.6765 addr=0.6515 gen=0.0000
+contrast=0.0250
+2026-01-14 09:30:12,936 INFO train_cfm: train step=4260/6000 loss=0.5502 addr=0.5377 gen=0.0000 contrast=0.0125 step_s=0.053 avg_s=0.082
+step 4260/6000 loss=0.5502 addr=0.5377 gen=0.0000
+contrast=0.0125
+2026-01-14 09:30:13,993 INFO train_cfm: train step=4280/6000 loss=0.7188 addr=0.7063 gen=0.0000 contrast=0.0125 step_s=0.053 avg_s=0.082
+step 4280/6000 loss=0.7188 addr=0.7063 gen=0.0000
+contrast=0.0125
+2026-01-14 09:30:15,046 INFO train_cfm: train step=4300/6000 loss=0.5152 addr=0.5152 gen=0.0000 contrast=0.0000 step_s=0.053 avg_s=0.082
+step 4300/6000 loss=0.5152 addr=0.5152 gen=0.0000
+contrast=0.0000
+2026-01-14 09:30:16,105 INFO train_cfm: train step=4320/6000 loss=0.6411 addr=0.6411 gen=0.0000 contrast=0.0000 step_s=0.053 avg_s=0.082
+step 4320/6000 loss=0.6411 addr=0.6411 gen=0.0000
+contrast=0.0000
+2026-01-14 09:30:17,183 INFO train_cfm: train step=4340/6000 loss=0.5378 addr=0.5003 gen=0.0000 contrast=0.0375 step_s=0.054 avg_s=0.082
+step 4340/6000 loss=0.5378 addr=0.5003 gen=0.0000
+contrast=0.0375
+2026-01-14 09:30:18,256 INFO train_cfm: train step=4360/6000 loss=0.5934 addr=0.5808 gen=0.0000 contrast=0.0125 step_s=0.054 avg_s=0.082
+step 4360/6000 loss=0.5934 addr=0.5808 gen=0.0000
+contrast=0.0125
+2026-01-14 09:30:19,320 INFO train_cfm: train step=4380/6000 loss=0.6293 addr=0.6293 gen=0.0000 contrast=0.0000 step_s=0.053 avg_s=0.081
+step 4380/6000 loss=0.6293 addr=0.6293 gen=0.0000
+contrast=0.0000
+2026-01-14 09:30:20,394 INFO train_cfm: train step=4400/6000 loss=0.4791 addr=0.4791 gen=0.0000 contrast=0.0000 step_s=0.054 avg_s=0.081
+step 4400/6000 loss=0.4791 addr=0.4791 gen=0.0000
+contrast=0.0000
+2026-01-14 09:30:21,470 INFO train_cfm: train step=4420/6000 loss=0.5069 addr=0.4569 gen=0.0000 contrast=0.0500 step_s=0.054 avg_s=0.081
+step 4420/6000 loss=0.5069 addr=0.4569 gen=0.0000
+contrast=0.0500
+2026-01-14 09:30:22,542 INFO train_cfm: train step=4440/6000 loss=0.3577 addr=0.3577 gen=0.0000 contrast=0.0000 step_s=0.054 avg_s=0.081
+step 4440/6000 loss=0.3577 addr=0.3577 gen=0.0000
+contrast=0.0000
+2026-01-14 09:30:23,400 INFO train_cfm: train step=4456/6000 loss=0.3567 addr=0.3442 gen=0.0000 contrast=0.0125 step_s=0.054 avg_s=0.081
+step 4456/6000 loss=0.3567 addr=0.3442 gen=0.0000
+contrast=0.0125
+2026-01-14 09:30:23,644 INFO train_cfm: train step=4460/6000 loss=0.4035 addr=0.3909 gen=0.0000 contrast=0.0125 step_s=0.061 avg_s=0.081
+step 4460/6000 loss=0.4035 addr=0.3909 gen=0.0000
+contrast=0.0125
+2026-01-14 09:30:24,722 INFO train_cfm: train step=4480/6000 loss=0.6880 addr=0.6880 gen=0.0000 contrast=0.0000 step_s=0.054 avg_s=0.081
+step 4480/6000 loss=0.6880 addr=0.6880 gen=0.0000
+contrast=0.0000
+2026-01-14 09:30:25,801 INFO train_cfm: train step=4500/6000 loss=0.3674 addr=0.3674 gen=0.0000 contrast=0.0000 step_s=0.054 avg_s=0.081
+step 4500/6000 loss=0.3674 addr=0.3674 gen=0.0000
+contrast=0.0000
+2026-01-14 09:30:26,912 INFO train_cfm: train step=4520/6000 loss=0.4085 addr=0.4085 gen=0.0000 contrast=0.0000 step_s=0.056 avg_s=0.081
+step 4520/6000 loss=0.4085 addr=0.4085 gen=0.0000
+contrast=0.0000
+2026-01-14 09:30:27,998 INFO train_cfm: train step=4540/6000 loss=0.3831 addr=0.3706 gen=0.0000 contrast=0.0125 step_s=0.054 avg_s=0.080
+step 4540/6000 loss=0.3831 addr=0.3706 gen=0.0000
+contrast=0.0125
+2026-01-14 09:30:29,076 INFO train_cfm: train step=4560/6000 loss=0.4575 addr=0.4200 gen=0.0000 contrast=0.0375 step_s=0.054 avg_s=0.080
+step 4560/6000 loss=0.4575 addr=0.4200 gen=0.0000
+contrast=0.0375
+2026-01-14 09:30:30,144 INFO train_cfm: train step=4580/6000 loss=0.4936 addr=0.4811 gen=0.0000 contrast=0.0125 step_s=0.053 avg_s=0.080
+step 4580/6000 loss=0.4936 addr=0.4811 gen=0.0000
+contrast=0.0125
+2026-01-14 09:30:31,217 INFO train_cfm: train step=4600/6000 loss=0.6114 addr=0.5864 gen=0.0000 contrast=0.0250 step_s=0.054 avg_s=0.080
+step 4600/6000 loss=0.6114 addr=0.5864 gen=0.0000
+contrast=0.0250
+2026-01-14 09:30:32,300 INFO train_cfm: train step=4620/6000 loss=0.5090 addr=0.5061 gen=0.0029 contrast=0.0000 step_s=0.054 avg_s=0.080
+step 4620/6000 loss=0.5090 addr=0.5061 gen=0.0029
+contrast=0.0000
+2026-01-14 09:30:33,407 INFO train_cfm: train step=4640/6000 loss=0.4550 addr=0.4425 gen=0.0000 contrast=0.0125 step_s=0.055 avg_s=0.080
+step 4640/6000 loss=0.4550 addr=0.4425 gen=0.0000
+contrast=0.0125
+2026-01-14 09:30:34,512 INFO train_cfm: train step=4660/6000 loss=0.2902 addr=0.2777 gen=0.0000 contrast=0.0125 step_s=0.055 avg_s=0.080
+step 4660/6000 loss=0.2902 addr=0.2777 gen=0.0000
+contrast=0.0125
+2026-01-14 09:30:35,605 INFO train_cfm: train step=4680/6000 loss=0.3042 addr=0.3042 gen=0.0000 contrast=0.0000 step_s=0.055 avg_s=0.080
+step 4680/6000 loss=0.3042 addr=0.3042 gen=0.0000
+contrast=0.0000
+2026-01-14 09:30:36,694 INFO train_cfm: train step=4700/6000 loss=0.4201 addr=0.4076 gen=0.0000 contrast=0.0125 step_s=0.054 avg_s=0.080
+step 4700/6000 loss=0.4201 addr=0.4076 gen=0.0000
+contrast=0.0125
+2026-01-14 09:30:37,758 INFO train_cfm: train step=4720/6000 loss=0.3375 addr=0.3250 gen=0.0000 contrast=0.0125 step_s=0.053 avg_s=0.079
+step 4720/6000 loss=0.3375 addr=0.3250 gen=0.0000
+contrast=0.0125
+2026-01-14 09:30:38,836 INFO train_cfm: train step=4740/6000 loss=0.3706 addr=0.3206 gen=0.0000 contrast=0.0500 step_s=0.054 avg_s=0.079
+step 4740/6000 loss=0.3706 addr=0.3206 gen=0.0000
+contrast=0.0500
+2026-01-14 09:30:39,909 INFO train_cfm: train step=4760/6000 loss=0.2788 addr=0.2788 gen=0.0000 contrast=0.0000 step_s=0.054 avg_s=0.079
+step 4760/6000 loss=0.2788 addr=0.2788 gen=0.0000
+contrast=0.0000
+2026-01-14 09:30:40,994 INFO train_cfm: train step=4780/6000 loss=0.4524 addr=0.4524 gen=0.0000 contrast=0.0000 step_s=0.054 avg_s=0.079
+step 4780/6000 loss=0.4524 addr=0.4524 gen=0.0000
+contrast=0.0000
+2026-01-14 09:30:42,057 INFO train_cfm: train step=4800/6000 loss=0.4617 addr=0.4367 gen=0.0000 contrast=0.0250 step_s=0.053 avg_s=0.079
+step 4800/6000 loss=0.4617 addr=0.4367 gen=0.0000
+contrast=0.0250
+2026-01-14 09:30:43,142 INFO train_cfm: train step=4820/6000 loss=0.4950 addr=0.4950 gen=0.0000 contrast=0.0000 step_s=0.054 avg_s=0.079
+step 4820/6000 loss=0.4950 addr=0.4950 gen=0.0000
+contrast=0.0000
+2026-01-14 09:30:44,222 INFO train_cfm: train step=4840/6000 loss=0.3290 addr=0.2915 gen=0.0000 contrast=0.0375 step_s=0.054 avg_s=0.079
+step 4840/6000 loss=0.3290 addr=0.2915 gen=0.0000
+contrast=0.0375
+2026-01-14 09:30:45,295 INFO train_cfm: train step=4860/6000 loss=0.3404 addr=0.3279 gen=0.0000 contrast=0.0125 step_s=0.054 avg_s=0.079
+step 4860/6000 loss=0.3404 addr=0.3279 gen=0.0000
+contrast=0.0125
+2026-01-14 09:30:46,367 INFO train_cfm: train step=4880/6000 loss=0.2397 addr=0.2147 gen=0.0000 contrast=0.0250 step_s=0.054 avg_s=0.079
+step 4880/6000 loss=0.2397 addr=0.2147 gen=0.0000
+contrast=0.0250
+2026-01-14 09:30:47,427 INFO train_cfm: train step=4900/6000 loss=0.3118 addr=0.3118 gen=0.0000 contrast=0.0000 step_s=0.053 avg_s=0.078
+step 4900/6000 loss=0.3118 addr=0.3118 gen=0.0000
+contrast=0.0000
+2026-01-14 09:30:48,508 INFO train_cfm: train step=4920/6000 loss=0.1816 addr=0.1690 gen=0.0000 contrast=0.0125 step_s=0.054 avg_s=0.078
+step 4920/6000 loss=0.1816 addr=0.1690 gen=0.0000
+contrast=0.0125
+2026-01-14 09:30:49,604 INFO train_cfm: train step=4940/6000 loss=0.3053 addr=0.2928 gen=0.0000 contrast=0.0125 step_s=0.055 avg_s=0.078
+step 4940/6000 loss=0.3053 addr=0.2928 gen=0.0000
+contrast=0.0125
+2026-01-14 09:30:50,696 INFO train_cfm: train step=4960/6000 loss=0.3169 addr=0.3169 gen=0.0000 contrast=0.0000 step_s=0.055 avg_s=0.078
+step 4960/6000 loss=0.3169 addr=0.3169 gen=0.0000
+contrast=0.0000
+2026-01-14 09:30:51,781 INFO train_cfm: train step=4980/6000 loss=0.2629 addr=0.2504 gen=0.0000 contrast=0.0125 step_s=0.054 avg_s=0.078
+step 4980/6000 loss=0.2629 addr=0.2504 gen=0.0000
+contrast=0.0125
+2026-01-14 09:30:52,852 INFO train_cfm: train step=5000/6000 loss=0.2242 addr=0.2242 gen=0.0000 contrast=0.0000 step_s=0.054 avg_s=0.078
+step 5000/6000 loss=0.2242 addr=0.2242 gen=0.0000
+contrast=0.0000
+2026-01-14 09:30:53,449 INFO train_cfm: train step=5011/6000 loss=0.2123 addr=0.2122 gen=0.0000 contrast=0.0000 step_s=0.054 avg_s=0.078
+step 5011/6000 loss=0.2123 addr=0.2122 gen=0.0000
+contrast=0.0000
+2026-01-14 09:30:53,937 INFO train_cfm: train step=5020/6000 loss=0.2634 addr=0.2634 gen=0.0000 contrast=0.0000 step_s=0.054 avg_s=0.078
+step 5020/6000 loss=0.2634 addr=0.2634 gen=0.0000
+contrast=0.0000
+2026-01-14 09:30:55,008 INFO train_cfm: train step=5040/6000 loss=0.2543 addr=0.2418 gen=0.0000 contrast=0.0125 step_s=0.054 avg_s=0.078
+step 5040/6000 loss=0.2543 addr=0.2418 gen=0.0000
+contrast=0.0125
+2026-01-14 09:30:56,102 INFO train_cfm: train step=5060/6000 loss=0.3062 addr=0.2937 gen=0.0000 contrast=0.0125 step_s=0.055 avg_s=0.078
+step 5060/6000 loss=0.3062 addr=0.2937 gen=0.0000
+contrast=0.0125
+2026-01-14 09:30:57,201 INFO train_cfm: train step=5080/6000 loss=0.4762 addr=0.4637 gen=0.0000 contrast=0.0125 step_s=0.055 avg_s=0.078
+step 5080/6000 loss=0.4762 addr=0.4637 gen=0.0000
+contrast=0.0125
+2026-01-14 09:30:58,295 INFO train_cfm: train step=5100/6000 loss=0.2853 addr=0.2603 gen=0.0000 contrast=0.0250 step_s=0.055 avg_s=0.078
+step 5100/6000 loss=0.2853 addr=0.2603 gen=0.0000
+contrast=0.0250
+2026-01-14 09:30:59,363 INFO train_cfm: train step=5120/6000 loss=0.2291 addr=0.2291 gen=0.0000 contrast=0.0000 step_s=0.053 avg_s=0.077
+step 5120/6000 loss=0.2291 addr=0.2291 gen=0.0000
+contrast=0.0000
+2026-01-14 09:31:00,438 INFO train_cfm: train step=5140/6000 loss=0.2110 addr=0.2110 gen=0.0000 contrast=0.0000 step_s=0.054 avg_s=0.077
+step 5140/6000 loss=0.2110 addr=0.2110 gen=0.0000
+contrast=0.0000
+2026-01-14 09:31:01,499 INFO train_cfm: train step=5160/6000 loss=0.2532 addr=0.2407 gen=0.0000 contrast=0.0125 step_s=0.053 avg_s=0.077
+step 5160/6000 loss=0.2532 addr=0.2407 gen=0.0000
+contrast=0.0125
+2026-01-14 09:31:02,572 INFO train_cfm: train step=5180/6000 loss=0.2824 addr=0.2824 gen=0.0000 contrast=0.0000 step_s=0.054 avg_s=0.077
+step 5180/6000 loss=0.2824 addr=0.2824 gen=0.0000
+contrast=0.0000
+2026-01-14 09:31:03,657 INFO train_cfm: train step=5200/6000 loss=0.2075 addr=0.1575 gen=0.0000 contrast=0.0500 step_s=0.054 avg_s=0.077
+step 5200/6000 loss=0.2075 addr=0.1575 gen=0.0000
+contrast=0.0500
+2026-01-14 09:31:04,726 INFO train_cfm: train step=5220/6000 loss=0.2941 addr=0.2566 gen=0.0000 contrast=0.0375 step_s=0.053 avg_s=0.077
+step 5220/6000 loss=0.2941 addr=0.2566 gen=0.0000
+contrast=0.0375
+2026-01-14 09:31:05,796 INFO train_cfm: train step=5240/6000 loss=0.3080 addr=0.2955 gen=0.0000 contrast=0.0125 step_s=0.053 avg_s=0.077
+step 5240/6000 loss=0.3080 addr=0.2955 gen=0.0000
+contrast=0.0125
+2026-01-14 09:31:06,866 INFO train_cfm: train step=5260/6000 loss=0.1250 addr=0.1250 gen=0.0000 contrast=0.0000 step_s=0.054 avg_s=0.077
+step 5260/6000 loss=0.1250 addr=0.1250 gen=0.0000
+contrast=0.0000
+2026-01-14 09:31:07,928 INFO train_cfm: train step=5280/6000 loss=0.2592 addr=0.2467 gen=0.0000 contrast=0.0125 step_s=0.053 avg_s=0.077
+step 5280/6000 loss=0.2592 addr=0.2467 gen=0.0000
+contrast=0.0125
+2026-01-14 09:31:08,991 INFO train_cfm: train step=5300/6000 loss=0.2085 addr=0.2085 gen=0.0000 contrast=0.0000 step_s=0.053 avg_s=0.077
+step 5300/6000 loss=0.2085 addr=0.2085 gen=0.0000
+contrast=0.0000
+2026-01-14 09:31:10,078 INFO train_cfm: train step=5320/6000 loss=0.1688 addr=0.1312 gen=0.0000 contrast=0.0375 step_s=0.054 avg_s=0.077
+step 5320/6000 loss=0.1688 addr=0.1312 gen=0.0000
+contrast=0.0375
+2026-01-14 09:31:11,168 INFO train_cfm: train step=5340/6000 loss=0.2742 addr=0.2492 gen=0.0000 contrast=0.0250 step_s=0.055 avg_s=0.076
+step 5340/6000 loss=0.2742 addr=0.2492 gen=0.0000
+contrast=0.0250
+2026-01-14 09:31:12,224 INFO train_cfm: train step=5360/6000 loss=0.1473 addr=0.1223 gen=0.0000 contrast=0.0250 step_s=0.053 avg_s=0.076
+step 5360/6000 loss=0.1473 addr=0.1223 gen=0.0000
+contrast=0.0250
+2026-01-14 09:31:13,301 INFO train_cfm: train step=5380/6000 loss=0.3152 addr=0.3027 gen=0.0000 contrast=0.0125 step_s=0.054 avg_s=0.076
+step 5380/6000 loss=0.3152 addr=0.3027 gen=0.0000
+contrast=0.0125
+2026-01-14 09:31:14,416 INFO train_cfm: train step=5400/6000 loss=0.2462 addr=0.2462 gen=0.0000 contrast=0.0000 step_s=0.056 avg_s=0.076
+step 5400/6000 loss=0.2462 addr=0.2462 gen=0.0000
+contrast=0.0000
+2026-01-14 09:31:15,495 INFO train_cfm: train step=5420/6000 loss=0.1291 addr=0.1041 gen=0.0000 contrast=0.0250 step_s=0.054 avg_s=0.076
+step 5420/6000 loss=0.1291 addr=0.1041 gen=0.0000
+contrast=0.0250
+2026-01-14 09:31:16,563 INFO train_cfm: train step=5440/6000 loss=0.2321 addr=0.2321 gen=0.0000 contrast=0.0000 step_s=0.053 avg_s=0.076
+step 5440/6000 loss=0.2321 addr=0.2321 gen=0.0000
+contrast=0.0000
+2026-01-14 09:31:17,619 INFO train_cfm: train step=5460/6000 loss=0.1069 addr=0.0819 gen=0.0000 contrast=0.0250 step_s=0.053 avg_s=0.076
+step 5460/6000 loss=0.1069 addr=0.0819 gen=0.0000
+contrast=0.0250
+2026-01-14 09:31:18,703 INFO train_cfm: train step=5480/6000 loss=0.2549 addr=0.2299 gen=0.0000 contrast=0.0250 step_s=0.054 avg_s=0.076
+step 5480/6000 loss=0.2549 addr=0.2299 gen=0.0000
+contrast=0.0250
+2026-01-14 09:31:19,804 INFO train_cfm: train step=5500/6000 loss=0.2547 addr=0.2422 gen=0.0000 contrast=0.0125 step_s=0.055 avg_s=0.076
+step 5500/6000 loss=0.2547 addr=0.2422 gen=0.0000
+contrast=0.0125
+2026-01-14 09:31:20,897 INFO train_cfm: train step=5520/6000 loss=0.3816 addr=0.3441 gen=0.0000 contrast=0.0375 step_s=0.055 avg_s=0.076
+step 5520/6000 loss=0.3816 addr=0.3441 gen=0.0000
+contrast=0.0375
+2026-01-14 09:31:21,962 INFO train_cfm: train step=5540/6000 loss=0.2088 addr=0.2088 gen=0.0000 contrast=0.0000 step_s=0.053 avg_s=0.076
+step 5540/6000 loss=0.2088 addr=0.2088 gen=0.0000
+contrast=0.0000
+2026-01-14 09:31:23,034 INFO train_cfm: train step=5560/6000 loss=0.2355 addr=0.2355 gen=0.0000 contrast=0.0000 step_s=0.054 avg_s=0.076
+step 5560/6000 loss=0.2355 addr=0.2355 gen=0.0000
+contrast=0.0000
+2026-01-14 09:31:23,472 INFO train_cfm: train step=5568/6000 loss=0.1662 addr=0.1537 gen=0.0000 contrast=0.0125 step_s=0.055 avg_s=0.076
+step 5568/6000 loss=0.1662 addr=0.1537 gen=0.0000
+contrast=0.0125
+2026-01-14 09:31:24,129 INFO train_cfm: train step=5580/6000 loss=0.0904 addr=0.0904 gen=0.0000 contrast=0.0000 step_s=0.055 avg_s=0.075
+step 5580/6000 loss=0.0904 addr=0.0904 gen=0.0000
+contrast=0.0000
+2026-01-14 09:31:25,210 INFO train_cfm: train step=5600/6000 loss=0.0787 addr=0.0787 gen=0.0000 contrast=0.0000 step_s=0.054 avg_s=0.075
+step 5600/6000 loss=0.0787 addr=0.0787 gen=0.0000
+contrast=0.0000
+2026-01-14 09:31:26,300 INFO train_cfm: train step=5620/6000 loss=0.0671 addr=0.0546 gen=0.0000 contrast=0.0125 step_s=0.055 avg_s=0.075
+step 5620/6000 loss=0.0671 addr=0.0546 gen=0.0000
+contrast=0.0125
+2026-01-14 09:31:27,403 INFO train_cfm: train step=5640/6000 loss=0.1942 addr=0.1816 gen=0.0000 contrast=0.0125 step_s=0.055 avg_s=0.075
+step 5640/6000 loss=0.1942 addr=0.1816 gen=0.0000
+contrast=0.0125
+2026-01-14 09:31:28,504 INFO train_cfm: train step=5660/6000 loss=0.0873 addr=0.0872 gen=0.0000 contrast=0.0000 step_s=0.055 avg_s=0.075
+step 5660/6000 loss=0.0873 addr=0.0872 gen=0.0000
+contrast=0.0000
+2026-01-14 09:31:29,601 INFO train_cfm: train step=5680/6000 loss=0.1215 addr=0.1090 gen=0.0000 contrast=0.0125 step_s=0.055 avg_s=0.075
+step 5680/6000 loss=0.1215 addr=0.1090 gen=0.0000
+contrast=0.0125
+2026-01-14 09:31:30,702 INFO train_cfm: train step=5700/6000 loss=0.2667 addr=0.2542 gen=0.0000 contrast=0.0125 step_s=0.055 avg_s=0.075
+step 5700/6000 loss=0.2667 addr=0.2542 gen=0.0000
+contrast=0.0125
+2026-01-14 09:31:31,805 INFO train_cfm: train step=5720/6000 loss=0.2148 addr=0.2148 gen=0.0000 contrast=0.0000 step_s=0.055 avg_s=0.075
+step 5720/6000 loss=0.2148 addr=0.2148 gen=0.0000
+contrast=0.0000
+2026-01-14 09:31:32,891 INFO train_cfm: train step=5740/6000 loss=0.1456 addr=0.1456 gen=0.0000 contrast=0.0000 step_s=0.054 avg_s=0.075
+step 5740/6000 loss=0.1456 addr=0.1456 gen=0.0000
+contrast=0.0000
+2026-01-14 09:31:33,981 INFO train_cfm: train step=5760/6000 loss=0.2149 addr=0.1899 gen=0.0000 contrast=0.0250 step_s=0.055 avg_s=0.075
+step 5760/6000 loss=0.2149 addr=0.1899 gen=0.0000
+contrast=0.0250
+2026-01-14 09:31:35,047 INFO train_cfm: train step=5780/6000 loss=0.2308 addr=0.2058 gen=0.0000 contrast=0.0250 step_s=0.053 avg_s=0.075
+step 5780/6000 loss=0.2308 addr=0.2058 gen=0.0000
+contrast=0.0250
+2026-01-14 09:31:36,113 INFO train_cfm: train step=5800/6000 loss=0.2863 addr=0.2738 gen=0.0000 contrast=0.0125 step_s=0.053 avg_s=0.075
+step 5800/6000 loss=0.2863 addr=0.2738 gen=0.0000
+contrast=0.0125
+2026-01-14 09:31:37,184 INFO train_cfm: train step=5820/6000 loss=0.1266 addr=0.1141 gen=0.0000 contrast=0.0125 step_s=0.054 avg_s=0.075
+step 5820/6000 loss=0.1266 addr=0.1141 gen=0.0000
+contrast=0.0125
+2026-01-14 09:31:38,254 INFO train_cfm: train step=5840/6000 loss=0.1377 addr=0.1127 gen=0.0000 contrast=0.0250 step_s=0.054 avg_s=0.075
+step 5840/6000 loss=0.1377 addr=0.1127 gen=0.0000
+contrast=0.0250
+2026-01-14 09:31:39,323 INFO train_cfm: train step=5860/6000 loss=0.0999 addr=0.0999 gen=0.0000 contrast=0.0000 step_s=0.053 avg_s=0.074
+step 5860/6000 loss=0.0999 addr=0.0999 gen=0.0000
+contrast=0.0000
+2026-01-14 09:31:40,497 INFO train_cfm: train step=5880/6000 loss=0.3362 addr=0.3112 gen=0.0000 contrast=0.0250 step_s=0.059 avg_s=0.074
+step 5880/6000 loss=0.3362 addr=0.3112 gen=0.0000
+contrast=0.0250
+2026-01-14 09:31:41,577 INFO train_cfm: train step=5900/6000 loss=0.2832 addr=0.2707 gen=0.0000 contrast=0.0125 step_s=0.054 avg_s=0.074
+step 5900/6000 loss=0.2832 addr=0.2707 gen=0.0000
+contrast=0.0125
+2026-01-14 09:31:42,661 INFO train_cfm: train step=5920/6000 loss=0.1742 addr=0.1742 gen=0.0000 contrast=0.0000 step_s=0.054 avg_s=0.074
+step 5920/6000 loss=0.1742 addr=0.1742 gen=0.0000
+contrast=0.0000
+2026-01-14 09:31:43,748 INFO train_cfm: train step=5940/6000 loss=0.2598 addr=0.2347 gen=0.0000 contrast=0.0250 step_s=0.054 avg_s=0.074
+step 5940/6000 loss=0.2598 addr=0.2347 gen=0.0000
+contrast=0.0250
+2026-01-14 09:31:44,817 INFO train_cfm: train step=5960/6000 loss=0.1574 addr=0.1324 gen=0.0000 contrast=0.0250 step_s=0.053 avg_s=0.074
+step 5960/6000 loss=0.1574 addr=0.1324 gen=0.0000
+contrast=0.0250
+2026-01-14 09:31:45,911 INFO train_cfm: train step=5980/6000 loss=0.1174 addr=0.1174 gen=0.0000 contrast=0.0000 step_s=0.055 avg_s=0.074
+step 5980/6000 loss=0.1174 addr=0.1174 gen=0.0000
+contrast=0.0000
+2026-01-14 09:31:46,995 INFO train_cfm: train step=6000/6000 loss=0.0346 addr=0.0346 gen=0.0000 contrast=0.0000 step_s=0.054 avg_s=0.074
+step 6000/6000 loss=0.0346 addr=0.0346 gen=0.0000
+contrast=0.0000
+2026-01-14 09:31:46,999 INFO train_cfm: training done time=444.11s
+2026-01-14 09:31:47,001 INFO train_cfm: eval start
+2026-01-14 09:32:25,891 INFO train_cfm: eval done
+2026-01-14 09:32:26,318 INFO train_cfm: checkpoint_saved path=out/ckpt/model.pt
+2026-01-14 09:32:26,329 INFO train_cfm: report_saved path=out/report.json
+Saved report to out/report.json
+[startup +0.00s] configure_env
+[startup +0.00s] import numpy
+[startup +1.82s] import torch
+[startup +29.50s] import typer
+[startup +29.76s] import yaml
+[startup +29.95s] import datasets
+[startup +30.03s] still import datasets
+[startup +41.79s] import rich.console
+[startup +60.06s] still import rich.console
+[startup +90.09s] still import rich.console
+[startup +91.17s] ready
+2026-01-14 10:02:09,193 INFO faiss.loader: Loading faiss with AVX2 support.
+2026-01-14 10:02:09,522 INFO faiss.loader: Successfully loaded faiss with AVX2 support.
+2026-01-14 10:02:09,536 INFO eval_lama: gpu_enabled=true gpu_count=1 torch_cuda=true device=cuda
+2026-01-14 10:02:09,536 INFO eval_lama: faiss_available=true faiss_gpu_enabled=true faiss_gpu_count=1
+2026-01-14 10:02:09,539 INFO eval_lama: file_logging_enabled path=out/eval_lama.log
+2026-01-14 10:02:09,541 INFO eval_lama: load_tokenizer start
+2026-01-14 10:02:09,590 INFO eval_lama: load_tokenizer done vocab_size=12426 time=0.05s
+2026-01-14 10:02:09,591 INFO eval_lama: init_model start
+2026-01-14 10:02:09,876 INFO eval_lama: init_model done time=0.28s
+2026-01-14 10:02:09,877 INFO eval_lama: load_checkpoint start path=out/ckpt/model.pt
+2026-01-14 10:02:10,207 INFO eval_lama: load_checkpoint done
+2026-01-14 10:02:10,724 INFO eval_lama: model_to_device done device=cuda
+2026-01-14 10:02:10,726 INFO eval_lama: discover_lama_configs start
+2026-01-14 10:02:11,029 WARNING eval_lama: get_dataset_config_names failed: Dataset scripts are no longer supported, but found lama.py; falling back to tar loader
+2026-01-14 10:02:11,030 INFO eval_lama: discover_lama_configs done use_fallback=True
+2026-01-14 10:02:11,031 INFO eval_lama: lama_configs=google_re,trex,conceptnet,squad
+2026-01-14 10:02:11,032 INFO eval_lama: load_dataset start cfg=google_re
+2026-01-14 10:02:11,033 INFO eval_lama: fallback_loader start cfg=google_re max_samples=200
+2026-01-14 10:02:11,034 INFO eval_lama: download_lama start url=https://dl.fbaipublicfiles.com/LAMA/negated_data.tar.gz
+2026-01-14 10:02:11,637 INFO eval_lama: download_lama done path=/workspace/cfm/.cache/huggingface/f0c7427c057314094b2aeec399a42fa7addbcf939bd87cdcda405cb0816a37ab.ee82ad44fd2fba431065e4d1c9d6ea140e567a1513f9f9629594d852e8e2e657
+2026-01-14 10:02:11,638 INFO eval_lama: download_relations start url=https://s3.amazonaws.com/datasets.huggingface.co/lama/relations.jsonl
+2026-01-14 10:02:11,728 INFO eval_lama: download_relations done path=/workspace/cfm/.cache/huggingface/deca75510df0a3df411820153660e4e5f20c3845edb23c18125ef375e6336846.781eb9a19ee41c34b283419aaa22602f0102a82fc8383f86752a839fee72785e
+2026-01-14 10:02:13,363 INFO eval_lama: fallback_loader done cfg=google_re records=200
+2026-01-14 10:02:13,364 INFO eval_lama: load_dataset done cfg=google_re samples=200 time=2.33s
+2026-01-14 10:02:13,365 INFO eval_lama: eval_config=google_re samples=200
+2026-01-14 10:02:17,730 INFO eval_lama: eval_progress cfg=google_re item=50/200 acc=0.000 step_s=0.087 avg_s=0.087
+2026-01-14 10:02:19,426 INFO eval_lama: eval_progress cfg=google_re item=100/200 acc=0.000 step_s=0.034 avg_s=0.061
+2026-01-14 10:02:21,104 INFO eval_lama: eval_progress cfg=google_re item=150/200 acc=0.000 step_s=0.034 avg_s=0.052
+2026-01-14 10:02:22,696 INFO eval_lama: eval_progress cfg=google_re item=200/200 acc=0.000 step_s=0.032 avg_s=0.047
+2026-01-14 10:02:22,700 INFO eval_lama: eval_config done cfg=google_re accuracy=0.0000
+2026-01-14 10:02:22,717 INFO eval_lama: load_dataset start cfg=trex
+2026-01-14 10:02:22,719 INFO eval_lama: fallback_loader start cfg=trex max_samples=200
+2026-01-14 10:02:22,721 INFO eval_lama: download_lama start url=https://dl.fbaipublicfiles.com/LAMA/negated_data.tar.gz
+2026-01-14 10:02:22,892 INFO eval_lama: download_lama done path=/workspace/cfm/.cache/huggingface/f0c7427c057314094b2aeec399a42fa7addbcf939bd87cdcda405cb0816a37ab.ee82ad44fd2fba431065e4d1c9d6ea140e567a1513f9f9629594d852e8e2e657
+2026-01-14 10:02:22,892 INFO eval_lama: download_relations start url=https://s3.amazonaws.com/datasets.huggingface.co/lama/relations.jsonl
+2026-01-14 10:02:22,983 INFO eval_lama: download_relations done path=/workspace/cfm/.cache/huggingface/deca75510df0a3df411820153660e4e5f20c3845edb23c18125ef375e6336846.781eb9a19ee41c34b283419aaa22602f0102a82fc8383f86752a839fee72785e
+2026-01-14 10:02:24,346 INFO eval_lama: fallback_loader done cfg=trex records=200
+2026-01-14 10:02:24,347 INFO eval_lama: load_dataset done cfg=trex samples=200 time=1.63s
+2026-01-14 10:02:24,348 INFO eval_lama: eval_config=trex samples=200
+2026-01-14 10:02:25,895 INFO eval_lama: eval_progress cfg=trex item=50/200 acc=0.000 step_s=0.031 avg_s=0.031
+2026-01-14 10:02:27,464 INFO eval_lama: eval_progress cfg=trex item=100/200 acc=0.000 step_s=0.031 avg_s=0.031
+2026-01-14 10:02:29,023 INFO eval_lama: eval_progress cfg=trex item=150/200 acc=0.000 step_s=0.031 avg_s=0.031
+2026-01-14 10:02:30,588 INFO eval_lama: eval_progress cfg=trex item=200/200 acc=0.000 step_s=0.031 avg_s=0.031
+2026-01-14 10:02:30,589 INFO eval_lama: eval_config done cfg=trex accuracy=0.0000
+2026-01-14 10:02:30,590 INFO eval_lama: load_dataset start cfg=conceptnet
+2026-01-14 10:02:30,590 INFO eval_lama: fallback_loader start cfg=conceptnet max_samples=200
+2026-01-14 10:02:30,591 INFO eval_lama: download_lama start url=https://dl.fbaipublicfiles.com/LAMA/negated_data.tar.gz
+2026-01-14 10:02:30,722 INFO eval_lama: download_lama done path=/workspace/cfm/.cache/huggingface/f0c7427c057314094b2aeec399a42fa7addbcf939bd87cdcda405cb0816a37ab.ee82ad44fd2fba431065e4d1c9d6ea140e567a1513f9f9629594d852e8e2e657
+2026-01-14 10:02:30,723 INFO eval_lama: download_relations start url=https://s3.amazonaws.com/datasets.huggingface.co/lama/relations.jsonl
+2026-01-14 10:02:30,823 INFO eval_lama: download_relations done path=/workspace/cfm/.cache/huggingface/deca75510df0a3df411820153660e4e5f20c3845edb23c18125ef375e6336846.781eb9a19ee41c34b283419aaa22602f0102a82fc8383f86752a839fee72785e
+2026-01-14 10:02:33,957 INFO eval_lama: fallback_loader done cfg=conceptnet records=200
+2026-01-14 10:02:33,958 INFO eval_lama: load_dataset done cfg=conceptnet samples=200 time=3.37s
+2026-01-14 10:02:33,959 INFO eval_lama: eval_config=conceptnet samples=200
+2026-01-14 10:02:35,574 INFO eval_lama: eval_progress cfg=conceptnet item=50/200 acc=0.000 step_s=0.032 avg_s=0.032
+2026-01-14 10:02:37,175 INFO eval_lama: eval_progress cfg=conceptnet item=100/200 acc=0.000 step_s=0.032 avg_s=0.032
+2026-01-14 10:02:38,760 INFO eval_lama: eval_progress cfg=conceptnet item=150/200 acc=0.000 step_s=0.032 avg_s=0.032
+2026-01-14 10:02:40,328 INFO eval_lama: eval_progress cfg=conceptnet item=200/200 acc=0.000 step_s=0.031 avg_s=0.032
+2026-01-14 10:02:40,329 INFO eval_lama: eval_config done cfg=conceptnet accuracy=0.0000
+2026-01-14 10:02:40,330 INFO eval_lama: load_dataset start cfg=squad
+2026-01-14 10:02:40,331 INFO eval_lama: fallback_loader start cfg=squad max_samples=200
+2026-01-14 10:02:40,332 INFO eval_lama: download_lama start url=https://dl.fbaipublicfiles.com/LAMA/negated_data.tar.gz
+2026-01-14 10:02:40,464 INFO eval_lama: download_lama done path=/workspace/cfm/.cache/huggingface/f0c7427c057314094b2aeec399a42fa7addbcf939bd87cdcda405cb0816a37ab.ee82ad44fd2fba431065e4d1c9d6ea140e567a1513f9f9629594d852e8e2e657
+2026-01-14 10:02:40,465 INFO eval_lama: download_relations start url=https://s3.amazonaws.com/datasets.huggingface.co/lama/relations.jsonl
+2026-01-14 10:02:40,548 INFO eval_lama: download_relations done path=/workspace/cfm/.cache/huggingface/deca75510df0a3df411820153660e4e5f20c3845edb23c18125ef375e6336846.781eb9a19ee41c34b283419aaa22602f0102a82fc8383f86752a839fee72785e
+2026-01-14 10:02:41,882 INFO eval_lama: fallback_loader done cfg=squad records=200
+2026-01-14 10:02:41,883 INFO eval_lama: load_dataset done cfg=squad samples=200 time=1.55s
+2026-01-14 10:02:41,884 INFO eval_lama: eval_config=squad samples=200
+2026-01-14 10:02:43,476 INFO eval_lama: eval_progress cfg=squad item=50/200 acc=0.000 step_s=0.032 avg_s=0.032
+2026-01-14 10:02:45,024 INFO eval_lama: eval_progress cfg=squad item=100/200 acc=0.000 step_s=0.031 avg_s=0.031
+2026-01-14 10:02:46,584 INFO eval_lama: eval_progress cfg=squad item=150/200 acc=0.000 step_s=0.031 avg_s=0.031
+2026-01-14 10:02:48,150 INFO eval_lama: eval_progress cfg=squad item=200/200 acc=0.000 step_s=0.031 avg_s=0.031
+2026-01-14 10:02:48,152 INFO eval_lama: eval_config done cfg=squad accuracy=0.0000
+2026-01-14 10:02:48,160 INFO eval_lama: report_saved path=out/lama_report.json
+Saved LAMA report to out/lama_report.json

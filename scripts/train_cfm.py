@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import random
+import sys
+import threading
+import time
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -14,13 +18,51 @@ from forge_omega_500.runtime import (
     setup_logger,
 )
 
+_STARTUP_T0 = time.perf_counter()
+_STARTUP_STAGE = "boot"
+_STARTUP_LOCK = threading.Lock()
+
+
+def _startup_log(message: str) -> None:
+    elapsed = time.perf_counter() - _STARTUP_T0
+    print(f"[startup +{elapsed:.2f}s] {message}", file=sys.stderr, flush=True)
+
+
+def _set_startup_stage(message: str, log: bool = True) -> None:
+    global _STARTUP_STAGE
+    with _STARTUP_LOCK:
+        _STARTUP_STAGE = message
+    if log:
+        _startup_log(message)
+
+
+def _startup_watchdog(interval: float = 30.0) -> None:
+    while True:
+        time.sleep(interval)
+        with _STARTUP_LOCK:
+            stage = _STARTUP_STAGE
+        if stage == "ready":
+            return
+        elapsed = time.perf_counter() - _STARTUP_T0
+        print(f"[startup +{elapsed:.2f}s] still {stage}", file=sys.stderr, flush=True)
+
+
+threading.Thread(target=_startup_watchdog, daemon=True).start()
+
+_set_startup_stage("configure_env")
 configure_env(DEFAULT_CPU_THREADS)
 
+_set_startup_stage("import numpy")
 import numpy as np
+_set_startup_stage("import torch")
 import torch
+_set_startup_stage("import torch.nn.functional")
 import torch.nn.functional as F
+_set_startup_stage("import typer")
 import typer
+_set_startup_stage("import yaml")
 import yaml
+_set_startup_stage("import rich.console")
 from rich.console import Console
 
 from forge_omega_500.data.rvq import load_answer_codes
@@ -30,6 +72,24 @@ from forge_omega_500.model.utils import SimpleTokenizer, pad_sequences, set_seed
 console = Console()
 logger = setup_logger("train_cfm")
 app = typer.Typer(add_completion=False)
+_FILE_LOG_READY = False
+
+_set_startup_stage("ready")
+
+
+def _ensure_file_logger(out_dir: Path) -> None:
+    global _FILE_LOG_READY
+    if _FILE_LOG_READY:
+        return
+    out_dir.mkdir(parents=True, exist_ok=True)
+    log_path = out_dir / "train_cfm.log"
+    handler = logging.FileHandler(log_path)
+    handler.setLevel(logging.INFO)
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.info("file_logging_enabled path=%s", log_path)
+    _FILE_LOG_READY = True
 
 
 def _load_factbank(factbank_dir: Path) -> List[Dict[str, object]]:
@@ -231,25 +291,43 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
     train_cfg = cfg["train"]
     inf_cfg = cfg["inference"]
 
+    out_dir = Path("out")
+    _ensure_file_logger(out_dir)
+
     factbank_dir = Path(data_cfg["factbank_dir"])
     codes_dir = Path(data_cfg["codes_dir"])
 
     logger.info("load_factbank start")
+    t0 = time.perf_counter()
     records = _load_factbank(factbank_dir)
+    logger.info("load_factbank done records=%s time=%.2fs", len(records), time.perf_counter() - t0)
+    logger.info("load_answer_codes start path=%s", codes_dir / "answer_codes.parquet")
+    t0 = time.perf_counter()
     answer_codes = load_answer_codes(codes_dir / "answer_codes.parquet")
+    logger.info("load_answer_codes done answers=%s time=%.2fs", len(answer_codes), time.perf_counter() - t0)
 
+    logger.info("build_examples start")
+    t0 = time.perf_counter()
     examples = _build_examples(records, answer_codes)
-    logger.info("examples=%s orbits_per_fact=%s", len(examples), len(records[0]["question_orbits"]) if records else 0)
+    logger.info(
+        "build_examples done examples=%s orbits_per_fact=%s time=%.2fs",
+        len(examples),
+        len(records[0]["question_orbits"]) if records else 0,
+        time.perf_counter() - t0,
+    )
     texts = [ex["prompt"] for ex in examples] + [ex["answer"] for ex in examples]
+    logger.info("build_tokenizer start texts=%s", len(texts))
+    t0 = time.perf_counter()
     tokenizer = SimpleTokenizer.build(texts, vocab_max=model_cfg.get("vocab_max"))
+    logger.info("build_tokenizer done vocab_size=%s time=%.2fs", len(tokenizer.vocab), time.perf_counter() - t0)
 
     out_dir = Path("out")
-    out_dir.mkdir(parents=True, exist_ok=True)
     tokenizer_path = out_dir / "tokenizer.json"
     tokenizer.save(tokenizer_path)
 
     codebook_path = codes_dir / "codebooks.safetensors"
     logger.info("init_model start")
+    t0 = time.perf_counter()
     model = CFMModel.from_codebooks(
         codebook_path,
         vocab_size=len(tokenizer.vocab),
@@ -262,11 +340,15 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
         backbone=model_cfg.get("backbone", "tiny"),
         hf_model_name=model_cfg.get("hf_model_name"),
     )
+    param_count = sum(p.numel() for p in model.parameters())
+    logger.info("init_model done params=%s time=%.2fs", param_count, time.perf_counter() - t0)
 
     device = torch.device("cuda" if torch_info.get("torch_cuda") else "cpu")
     model.to(device)
+    logger.info("model_to_device done device=%s", device.type)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=float(train_cfg["lr"]), weight_decay=float(train_cfg["weight_decay"]))
+    logger.info("optimizer_init done")
 
     rng = random.Random(seed)
     batch_size = int(train_cfg["batch_size"])
@@ -274,7 +356,20 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
     max_seq_len = int(model_cfg["max_seq_len"])
 
     model.train()
-    logger.info("training start steps=%s batch_size=%s device=%s", steps, batch_size, device.type)
+    log_every = int(train_cfg["log_every"])
+    time_log_interval = float(train_cfg.get("time_log_interval", 30.0))
+    logger.info(
+        "training start steps=%s batch_size=%s device=%s log_every=%s time_log_interval=%.1fs",
+        steps,
+        batch_size,
+        device.type,
+        log_every,
+        time_log_interval,
+    )
+    train_start = time.perf_counter()
+    last_log_time = train_start
+    last_log_step = 0
+    next_time_log = train_start + time_log_interval
     for step in range(steps):
         batch = [examples[rng.randrange(len(examples))] for _ in range(batch_size)]
         (
@@ -327,11 +422,33 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
         loss.backward()
         optimizer.step()
 
-        if (step + 1) % int(train_cfg["log_every"]) == 0:
+        now = time.perf_counter()
+        log_due = (step + 1) % log_every == 0 or now >= next_time_log
+        if log_due:
+            steps_since = (step + 1) - last_log_step
+            step_time = (now - last_log_time) / max(steps_since, 1)
+            avg_time = (now - train_start) / (step + 1)
+            logger.info(
+                "train step=%s/%s loss=%.4f addr=%.4f gen=%.4f contrast=%.4f step_s=%.3f avg_s=%.3f",
+                step + 1,
+                steps,
+                loss.item(),
+                addr_loss.item(),
+                gen_loss.item(),
+                contrast_loss.item(),
+                step_time,
+                avg_time,
+            )
             console.print(
                 f"step {step+1}/{steps} loss={loss.item():.4f} addr={addr_loss.item():.4f} gen={gen_loss.item():.4f} contrast={contrast_loss.item():.4f}"
             )
+            last_log_time = now
+            last_log_step = step + 1
+            if now >= next_time_log:
+                next_time_log = now + time_log_interval
 
+    logger.info("training done time=%.2fs", time.perf_counter() - train_start)
+    logger.info("eval start")
     report = {
         "code_em": _compute_code_em(model, examples, tokenizer, max_seq_len=max_seq_len),
         "answer_em": _compute_answer_em(
@@ -344,14 +461,17 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
         "orbit_consistency": _compute_orbit_consistency(model, records, tokenizer, max_seq_len=max_seq_len),
         "negative_margin": _compute_negative_margin(model, records, answer_codes),
     }
+    logger.info("eval done")
 
     out_dir = Path("out")
     ckpt_dir = out_dir / "ckpt"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     torch.save(model.state_dict(), ckpt_dir / "model.pt")
+    logger.info("checkpoint_saved path=%s", ckpt_dir / "model.pt")
 
     report_path = out_dir / "report.json"
     report_path.write_text(json.dumps(report, indent=2))
+    logger.info("report_saved path=%s", report_path)
     console.print(f"Saved report to {report_path}")
 
 

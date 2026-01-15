@@ -10,10 +10,10 @@ data:
   factbank_dir: data/factbank
   emb_dir: data/emb
   codes_dir: data/codes
-  max_triples: 1500
-  max_facts: 800
-  orbits_per_fact: 10
-  negatives_per_fact: 5
+  max_triples: 15000
+  max_facts: 8000
+  orbits_per_fact: 25
+  negatives_per_fact: 12
   use_direct_tar: true
   wikidata5m_sources: ["transductive"]
   hf_cache_dir: .cache/huggingface
@@ -31,16 +31,18 @@ model:
   max_seq_len: 64
   vocab_max: null
   m: 4
-  K: 1024
+  K: 2048
   d_code: 256
 
 rvq:
   iters: 8
   seed: 1234
+  require_faiss_gpu: true
+  gpu_search_batch: 256
 
 train:
-  batch_size: 32
-  steps: 1200
+  batch_size: 64
+  steps: 6000
   lr: 3.0e-4
   weight_decay: 0.01
   log_every: 20
