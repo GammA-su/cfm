@@ -28,6 +28,7 @@ from forge_omega_500.data.rvq import (
     save_codebooks,
     train_rvq,
 )
+from forge_omega_500.data.templates import load_relation_templates
 from forge_omega_500.model.utils import set_seed
 
 console = Console()
@@ -90,6 +91,13 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
             local_files_only=bool(data_cfg.get("local_files_only", False)),
         )
 
+    logger.info("load_relation_templates start")
+    relation_templates = load_relation_templates(
+        cache_dir=Path(data_cfg.get("hf_cache_dir", ".cache/huggingface")),
+        local_files_only=bool(data_cfg.get("local_files_only", False)),
+    )
+    logger.info("load_relation_templates done relations=%s", len(relation_templates))
+
     logger.info("build_factbank start")
     triples = load_triples(raw_path)
     logger.info("triples_loaded=%s", len(triples))
@@ -99,6 +107,8 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
         orbits_per_fact=int(data_cfg["orbits_per_fact"]),
         negatives_per_fact=int(data_cfg["negatives_per_fact"]),
         seed=seed,
+        templates_by_relation=relation_templates,
+        min_cloze=10,
     )
     save_factbank(records, factbank_dir)
     logger.info("facts_built=%s", len(records))
