@@ -133,11 +133,18 @@ def _find_latest_checkpoint(ckpt_dir: Path) -> Optional[Path]:
     return None
 
 
-def _load_checkpoint(path: Path, device: torch.device) -> Dict[str, object]:
+def _load_checkpoint(path: Path) -> Dict[str, object]:
     try:
-        return torch.load(path, map_location=device, weights_only=False)
+        return torch.load(path, map_location="cpu", weights_only=False)
     except TypeError:
-        return torch.load(path, map_location=device)
+        return torch.load(path, map_location="cpu")
+
+
+def _move_optimizer_state(optimizer: torch.optim.Optimizer, device: torch.device) -> None:
+    for state in optimizer.state.values():
+        for key, value in list(state.items()):
+            if torch.is_tensor(value):
+                state[key] = value.to(device)
 
 
 def _load_factbank(factbank_dir: Path) -> List[Dict[str, object]]:
@@ -570,13 +577,14 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
         ckpt_path = _find_latest_checkpoint(ckpt_dir)
         if ckpt_path:
             logger.info("resume_checkpoint start path=%s", ckpt_path)
-            checkpoint = _load_checkpoint(ckpt_path, device=device)
+            checkpoint = _load_checkpoint(ckpt_path)
             if "model" in checkpoint:
                 model.load_state_dict(checkpoint["model"])
             else:
                 logger.warning("resume_checkpoint missing=model_state path=%s", ckpt_path)
             if "optimizer" in checkpoint:
                 optimizer.load_state_dict(checkpoint["optimizer"])
+                _move_optimizer_state(optimizer, device)
             else:
                 logger.warning("resume_checkpoint missing=optimizer_state path=%s", ckpt_path)
             start_step = int(checkpoint.get("step", 0))
@@ -589,9 +597,13 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
             if "np_state" in checkpoint:
                 np.random.set_state(checkpoint["np_state"])
             if "torch_state" in checkpoint:
-                torch.random.set_rng_state(checkpoint["torch_state"])
+                torch_state = checkpoint["torch_state"]
+                if torch.is_tensor(torch_state):
+                    torch_state = torch_state.cpu()
+                torch.random.set_rng_state(torch_state)
             if torch_info.get("torch_cuda") and checkpoint.get("torch_cuda_state"):
-                torch.cuda.set_rng_state_all(checkpoint["torch_cuda_state"])
+                torch_cuda_state = checkpoint["torch_cuda_state"]
+                torch.cuda.set_rng_state_all([t.cpu() for t in torch_cuda_state])
             logger.info("resume_checkpoint done step=%s epoch=%s", start_step, epoch_idx)
         else:
             logger.info("resume_checkpoint skipped reason=no_checkpoint")
