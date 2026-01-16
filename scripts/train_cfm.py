@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import random
 import sys
 import threading
 import time
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -115,6 +117,138 @@ def _build_examples(records: List[Dict[str, object]], answer_codes: Dict[str, Li
                 "negatives": rec["hard_negatives"],
             })
     return examples
+
+
+def _is_cloze(prompt: str) -> bool:
+    return prompt.lstrip().lower().startswith("fill in the blank:")
+
+
+def _build_fact_index(records: List[Dict[str, object]], answer_codes: Dict[str, List[int]]) -> List[Dict[str, object]]:
+    facts = []
+    for rec in records:
+        answer = str(rec["object_label"])
+        codes = answer_codes.get(answer)
+        if codes is None:
+            continue
+        orbits = [str(o) for o in rec.get("question_orbits", []) if o]
+        if not orbits:
+            continue
+        cloze_orbits = [o for o in orbits if _is_cloze(o)]
+        other_orbits = [o for o in orbits if not _is_cloze(o)]
+        relation_id = str(rec.get("relation_id") or rec.get("relation_label") or "unknown")
+        facts.append({
+            "fact_id": rec["fact_id"],
+            "relation_id": relation_id,
+            "answer": answer,
+            "codes": codes,
+            "orbits": orbits,
+            "cloze_orbits": cloze_orbits,
+            "other_orbits": other_orbits,
+            "negatives": rec.get("hard_negatives", []),
+        })
+    return facts
+
+
+def _build_relation_index(facts: List[Dict[str, object]]) -> Tuple[List[str], Dict[str, List[int]]]:
+    relation_to_indices: Dict[str, List[int]] = defaultdict(list)
+    for idx, fact in enumerate(facts):
+        relation_to_indices[fact["relation_id"]].append(idx)
+    relation_ids = sorted(relation_to_indices.keys())
+    return relation_ids, relation_to_indices
+
+
+def _build_code_to_label(answer_codes: Dict[str, List[int]]) -> Dict[Tuple[int, ...], str]:
+    mapping: Dict[Tuple[int, ...], str] = {}
+    for answer, codes in sorted(answer_codes.items()):
+        key = tuple(int(c) for c in codes)
+        if key not in mapping:
+            mapping[key] = answer
+    return mapping
+
+
+def _choose_orbit(
+    fact: Dict[str, object],
+    rng: random.Random,
+    cloze_ratio: float,
+) -> Tuple[str, bool]:
+    cloze_orbits = fact["cloze_orbits"]
+    other_orbits = fact["other_orbits"]
+    use_cloze = bool(cloze_orbits) and (not other_orbits or rng.random() < cloze_ratio)
+    if use_cloze:
+        orbit = cloze_orbits[rng.randrange(len(cloze_orbits))]
+        return orbit, True
+    if other_orbits:
+        orbit = other_orbits[rng.randrange(len(other_orbits))]
+        return orbit, False
+    if cloze_orbits:
+        orbit = cloze_orbits[rng.randrange(len(cloze_orbits))]
+        return orbit, True
+    return "", False
+
+
+def _sample_fact_batch(
+    facts: List[Dict[str, object]],
+    relation_ids: List[str],
+    relation_to_indices: Dict[str, List[int]],
+    rng: random.Random,
+    facts_per_batch: int,
+    orbits_per_fact: int,
+    cloze_ratio: float,
+) -> List[Dict[str, object]]:
+    batch: List[Dict[str, object]] = []
+    for _ in range(facts_per_batch):
+        relation_id = relation_ids[rng.randrange(len(relation_ids))]
+        indices = relation_to_indices[relation_id]
+        fact = facts[indices[rng.randrange(len(indices))]]
+        for _ in range(orbits_per_fact):
+            prompt, is_cloze = _choose_orbit(fact, rng, cloze_ratio)
+            batch.append({
+                "fact_id": fact["fact_id"],
+                "prompt": prompt,
+                "answer": fact["answer"],
+                "codes": fact["codes"],
+                "negatives": fact["negatives"],
+                "relation_id": relation_id,
+                "is_cloze": is_cloze,
+            })
+    return batch
+
+
+def _orbit_consistency_loss(
+    addr_logits: List[torch.Tensor],
+    fact_ids: List[str],
+    is_cloze: List[bool],
+    cloze_boost: float,
+) -> torch.Tensor:
+    device = addr_logits[0].device
+    groups: Dict[str, List[int]] = defaultdict(list)
+    for idx, fact_id in enumerate(fact_ids):
+        groups[fact_id].append(idx)
+    loss = torch.tensor(0.0, device=device)
+    for indices in groups.values():
+        if len(indices) < 2:
+            continue
+        cloze_fraction = sum(1 for i in indices if is_cloze[i]) / len(indices)
+        group_weight = 1.0 + (cloze_boost - 1.0) * cloze_fraction
+        for logits in addr_logits:
+            group_logits = logits[indices]
+            log_probs = F.log_softmax(group_logits, dim=-1)
+            probs = torch.softmax(group_logits, dim=-1)
+            mean_probs = probs.mean(dim=0, keepdim=True)
+            loss = loss + group_weight * F.kl_div(log_probs, mean_probs.expand_as(log_probs), reduction="batchmean")
+    return loss
+
+
+def _batch_code_entropy(addr_logits: List[torch.Tensor]) -> torch.Tensor:
+    entropies = []
+    for logits in addr_logits:
+        preds = logits.argmax(dim=-1)
+        counts = torch.bincount(preds, minlength=logits.size(-1)).float()
+        probs = counts / counts.sum().clamp_min(1.0)
+        entropy = -torch.sum(probs * torch.log(probs + 1e-9))
+        entropy = entropy / math.log(logits.size(-1))
+        entropies.append(entropy)
+    return torch.stack(entropies).mean()
 
 
 def _prepare_batch(
@@ -354,6 +488,32 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
     batch_size = int(train_cfg["batch_size"])
     steps = int(train_cfg["steps"])
     max_seq_len = int(model_cfg["max_seq_len"])
+    orbits_per_fact_in_batch = max(2, int(train_cfg.get("orbits_per_fact_in_batch", 2)))
+    facts_per_batch = max(1, batch_size // orbits_per_fact_in_batch)
+    effective_batch = facts_per_batch * orbits_per_fact_in_batch
+    if effective_batch != batch_size:
+        logger.info("batch_size_adjusted requested=%s effective=%s", batch_size, effective_batch)
+    batch_size = effective_batch
+    cloze_ratio = float(train_cfg.get("cloze_ratio", 0.8))
+    if cloze_ratio < 0.0 or cloze_ratio > 1.0:
+        logger.warning("cloze_ratio_out_of_range value=%.3f; clamping to [0,1]", cloze_ratio)
+        cloze_ratio = min(max(cloze_ratio, 0.0), 1.0)
+    cloze_addr_weight = float(train_cfg.get("cloze_addr_weight", 2.0))
+    cloze_orbit_boost = float(train_cfg.get("cloze_orbit_boost", 2.0))
+    orbit_consistency_weight = float(train_cfg.get("orbit_consistency_weight", 0.2))
+    entropy_weight = float(train_cfg.get("entropy_weight", 0.01))
+
+    facts = _build_fact_index(records, answer_codes)
+    relation_ids, relation_to_indices = _build_relation_index(facts)
+    if not facts:
+        raise ValueError("No training facts with orbits and answer codes found.")
+    if not relation_ids:
+        raise ValueError("No relation ids found for relation-balanced sampling.")
+    code_to_label = _build_code_to_label(answer_codes)
+    steps_per_epoch = max(1, len(facts) // max(facts_per_batch, 1))
+    epoch_idx = 0
+    epoch_label_counts: Counter = Counter()
+    epoch_code_counts: List[Counter] = [Counter() for _ in range(int(model_cfg["m"]))]
 
     model.train()
     log_every = int(train_cfg["log_every"])
@@ -366,12 +526,34 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
         log_every,
         time_log_interval,
     )
+    logger.info(
+        "sampling_config facts_per_batch=%s orbits_per_fact=%s cloze_ratio=%.2f relations=%s",
+        facts_per_batch,
+        orbits_per_fact_in_batch,
+        cloze_ratio,
+        len(relation_ids),
+    )
+    logger.info(
+        "loss_weights cloze_addr=%.2f cloze_orbit_boost=%.2f orbit_weight=%.3f entropy_weight=%.4f",
+        cloze_addr_weight,
+        cloze_orbit_boost,
+        orbit_consistency_weight,
+        entropy_weight,
+    )
     train_start = time.perf_counter()
     last_log_time = train_start
     last_log_step = 0
     next_time_log = train_start + time_log_interval
     for step in range(steps):
-        batch = [examples[rng.randrange(len(examples))] for _ in range(batch_size)]
+        batch = _sample_fact_batch(
+            facts,
+            relation_ids,
+            relation_to_indices,
+            rng,
+            facts_per_batch=facts_per_batch,
+            orbits_per_fact=orbits_per_fact_in_batch,
+            cloze_ratio=cloze_ratio,
+        )
         (
             input_ids,
             attention_masks,
@@ -380,6 +562,8 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
             prompt_masks,
             code_targets,
         ) = _prepare_batch(batch, tokenizer, max_seq_len)
+        fact_ids = [ex["fact_id"] for ex in batch]
+        is_cloze = [bool(ex["is_cloze"]) for ex in batch]
 
         input_ids = input_ids.to(device)
         attention_masks = attention_masks.to(device)
@@ -391,15 +575,25 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
         addr_logits, _, _ = model.encode_prompt(prompt_ids, prompt_masks)
         addr_loss = 0.0
         for i, logits in enumerate(addr_logits):
-            addr_loss = addr_loss + F.cross_entropy(logits, code_targets[:, i])
+            weights = torch.tensor(
+                [cloze_addr_weight if flag else 1.0 for flag in is_cloze],
+                device=logits.device,
+                dtype=logits.dtype,
+            )
+            per_item = F.cross_entropy(logits, code_targets[:, i], reduction="none")
+            addr_loss = addr_loss + (per_item * weights).mean()
 
         _, logits = model.forward_generation(input_ids, attention_masks, code_targets)
         prefix_pad = torch.full((labels.size(0), 1), -100, device=labels.device, dtype=labels.dtype)
         labels = torch.cat([prefix_pad, labels], dim=1)
         gen_loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), labels.reshape(-1), ignore_index=-100)
 
+        orbit_loss = _orbit_consistency_loss(addr_logits, fact_ids, is_cloze, cloze_orbit_boost) * orbit_consistency_weight
+        entropy_reg = _batch_code_entropy(addr_logits)
+
         contrast_loss = torch.tensor(0.0, device=device)
         neg_codes = []
+        neg_from_hard = 0
         for ex in batch:
             negs = ex["negatives"]
             neg_code = None
@@ -407,20 +601,32 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
                 neg_answer = str(neg["object_label"])
                 if neg_answer in answer_codes:
                     neg_code = answer_codes[neg_answer]
+                    neg_from_hard += 1
                     break
             if neg_code is None:
-                neg_code = ex["codes"]
+                if len(batch) > 1:
+                    neg_code = batch[rng.randrange(len(batch))]["codes"]
+                else:
+                    neg_code = ex["codes"]
             neg_codes.append(neg_code)
         neg_codes = torch.tensor(neg_codes, device=device)
         v_pos = model.decode_value(code_targets)
         v_neg = model.decode_value(neg_codes)
         contrast_loss = contrastive_margin_loss(v_pos, v_neg, margin=float(train_cfg["contrast_margin"]))
 
-        loss = addr_loss + gen_loss + contrast_loss
+        loss = addr_loss + gen_loss + contrast_loss + orbit_loss - entropy_weight * entropy_reg
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+
+        with torch.no_grad():
+            pred_codes = torch.stack([logits.argmax(dim=-1) for logits in addr_logits], dim=1).cpu().tolist()
+        for code_tuple in pred_codes:
+            label = code_to_label.get(tuple(code_tuple), "unknown")
+            epoch_label_counts[label] += 1
+            for idx, code in enumerate(code_tuple):
+                epoch_code_counts[idx][int(code)] += 1
 
         now = time.perf_counter()
         log_due = (step + 1) % log_every == 0 or now >= next_time_log
@@ -429,23 +635,42 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
             step_time = (now - last_log_time) / max(steps_since, 1)
             avg_time = (now - train_start) / (step + 1)
             logger.info(
-                "train step=%s/%s loss=%.4f addr=%.4f gen=%.4f contrast=%.4f step_s=%.3f avg_s=%.3f",
+                "train step=%s/%s loss=%.4f addr=%.4f gen=%.4f contrast=%.4f orbit=%.4f entropy=%.4f neg_hard=%s step_s=%.3f avg_s=%.3f",
                 step + 1,
                 steps,
                 loss.item(),
                 addr_loss.item(),
                 gen_loss.item(),
                 contrast_loss.item(),
+                orbit_loss.item(),
+                entropy_reg.item(),
+                neg_from_hard,
                 step_time,
                 avg_time,
             )
             console.print(
-                f"step {step+1}/{steps} loss={loss.item():.4f} addr={addr_loss.item():.4f} gen={gen_loss.item():.4f} contrast={contrast_loss.item():.4f}"
+                f"step {step+1}/{steps} loss={loss.item():.4f} addr={addr_loss.item():.4f} gen={gen_loss.item():.4f} contrast={contrast_loss.item():.4f} orbit={orbit_loss.item():.4f} entropy={entropy_reg.item():.4f}"
             )
             last_log_time = now
             last_log_step = step + 1
             if now >= next_time_log:
                 next_time_log = now + time_log_interval
+
+        if (step + 1) % steps_per_epoch == 0:
+            epoch_idx += 1
+            total = sum(epoch_label_counts.values())
+            top_labels = sorted(epoch_label_counts.items(), key=lambda x: (-x[1], x[0]))[:5]
+            logger.info("epoch_end epoch=%s top_pred_labels=%s total=%s", epoch_idx, top_labels, total)
+            for idx, counts in enumerate(epoch_code_counts):
+                total_counts = sum(counts.values())
+                if total_counts == 0:
+                    entropy = 0.0
+                else:
+                    probs = np.array([v / total_counts for v in counts.values()], dtype=np.float32)
+                    entropy = float(-(probs * np.log(probs + 1e-9)).sum() / math.log(int(model_cfg["K"])))
+                logger.info("epoch_end epoch=%s code_entropy codebook=%s entropy=%.4f", epoch_idx, idx, entropy)
+            epoch_label_counts = Counter()
+            epoch_code_counts = [Counter() for _ in range(int(model_cfg["m"]))]
 
     logger.info("training done time=%.2fs", time.perf_counter() - train_start)
     logger.info("eval start")

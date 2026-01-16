@@ -19,6 +19,7 @@ from forge_omega_500.runtime import (
 
 configure_env(DEFAULT_CPU_THREADS)
 
+import numpy as np
 import pandas as pd
 import typer
 import yaml
@@ -37,19 +38,38 @@ def _normalize(text: str) -> str:
     return text.lower().strip().translate(_PUNCT_TABLE)
 
 
+def _iter_field_values(value: object) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, (list, tuple)):
+        items: List[str] = []
+        for item in value:
+            items.extend(_iter_field_values(item))
+        return items
+    if isinstance(value, np.ndarray):
+        if value.ndim == 0:
+            return _iter_field_values(value.item())
+        return _iter_field_values(value.tolist())
+    text = str(value).strip()
+    return [text] if text else []
+
+
 def _extract_subject(row: Dict[str, object]) -> str:
     for key in ("sub_label", "subject_label", "sub", "subject"):
-        value = row.get(key)
-        if value:
-            return str(value)
+        values = _iter_field_values(row.get(key))
+        if values:
+            return values[0]
     return ""
 
 
 def _extract_object(row: Dict[str, object]) -> str:
     for key in ("obj_label", "object_label", "obj", "answer"):
-        value = row.get(key)
-        if value:
-            return str(value)
+        values = _iter_field_values(row.get(key))
+        if values:
+            return values[0]
     return ""
 
 
@@ -57,18 +77,18 @@ def _extract_relation(row: Dict[str, object]) -> Tuple[str, str]:
     rel_id = ""
     rel_label = ""
     for key in ("predicate_id", "relation_id", "relation"):
-        value = row.get(key)
-        if value:
-            rel_id = str(value)
+        values = _iter_field_values(row.get(key))
+        if values:
+            rel_id = values[0]
             break
     for key in ("relation_label", "predicate_label"):
-        value = row.get(key)
-        if value:
-            rel_label = str(value)
+        values = _iter_field_values(row.get(key))
+        if values:
+            rel_label = values[0]
             break
-    template = row.get("template")
-    if not rel_label and template:
-        rel_label = str(template)
+    template_values = _iter_field_values(row.get("template"))
+    if not rel_label and template_values:
+        rel_label = template_values[0]
     return rel_id, rel_label
 
 

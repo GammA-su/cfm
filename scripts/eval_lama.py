@@ -57,6 +57,8 @@ _set_startup_stage("import numpy")
 import numpy as np
 _set_startup_stage("import torch")
 import torch
+_set_startup_stage("import safetensors")
+from safetensors.torch import load_file
 _set_startup_stage("import typer")
 import typer
 _set_startup_stage("import yaml")
@@ -193,33 +195,46 @@ def _replace_mask_tokens(text: str) -> str:
     return text
 
 
+def _iter_field_values(value: object) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, (list, tuple)):
+        items: List[str] = []
+        for item in value:
+            items.extend(_iter_field_values(item))
+        return items
+    if isinstance(value, np.ndarray):
+        if value.ndim == 0:
+            return _iter_field_values(value.item())
+        return _iter_field_values(value.tolist())
+    text = str(value).strip()
+    return [text] if text else []
+
+
 def _extract_masked_sentence(example: Dict[str, object]) -> Tuple[str, str]:
-    if example.get("masked_sentence"):
-        return str(example["masked_sentence"]), "masked_sentence"
-    if example.get("masked_sentences"):
-        values = example["masked_sentences"]
-        if isinstance(values, list):
-            for item in values:
-                if item:
-                    return str(item), "masked_sentences"
-        elif values:
-            return str(values), "masked_sentences"
-    if example.get("masked_prompt"):
-        return str(example["masked_prompt"]), "masked_prompt"
-    if example.get("sentence"):
-        return str(example["sentence"]), "sentence"
+    values = _iter_field_values(example.get("masked_sentence"))
+    if values:
+        return values[0], "masked_sentence"
+    values = _iter_field_values(example.get("masked_sentences"))
+    if values:
+        return values[0], "masked_sentences"
+    values = _iter_field_values(example.get("masked_prompt"))
+    if values:
+        return values[0], "masked_prompt"
+    values = _iter_field_values(example.get("sentence"))
+    if values:
+        return values[0], "sentence"
     return "", ""
 
 
 def _extract_subject(example: Dict[str, object]) -> str:
     for key in ("sub_label", "subject_label", "sub", "subject"):
-        value = example.get(key)
-        if isinstance(value, list):
-            for item in value:
-                if item:
-                    return str(item).strip()
-        elif value:
-            return str(value).strip()
+        values = _iter_field_values(example.get(key))
+        if values:
+            return values[0]
     return ""
 
 
@@ -228,8 +243,9 @@ def _build_prompt_with_field(example: Dict[str, object]) -> Tuple[str | None, st
     if masked_sentence:
         prompt = "Fill in the blank: " + _replace_mask_tokens(masked_sentence)
         return prompt, field or "masked_sentence"
-    template = example.get("template")
-    if template:
+    template_values = _iter_field_values(example.get("template"))
+    if template_values:
+        template = template_values[0]
         subject = _extract_subject(example)
         if not subject:
             return None, "template"
@@ -249,8 +265,9 @@ def _build_prompt(example: Dict[str, object]) -> str:
 
 def _gold_answer(example: Dict[str, object]) -> str:
     for key in ["obj_label", "obj", "object_label", "answer"]:
-        if key in example and example[key]:
-            return str(example[key])
+        values = _iter_field_values(example.get(key))
+        if values:
+            return values[0]
     return ""
 
 
@@ -352,6 +369,21 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
 
     codes_dir = Path(data_cfg["codes_dir"])
     codebook_path = codes_dir / "codebooks.safetensors"
+    logger.info("load_codebooks_meta start path=%s", codebook_path)
+    codebook_tensors = load_file(str(codebook_path))
+    codebooks = codebook_tensors["codebooks"]
+    codebook_m = int(codebooks.shape[0])
+    codebook_K = int(codebooks.shape[1])
+    cfg_m = int(model_cfg["m"])
+    cfg_K = int(model_cfg["K"])
+    if codebook_m != cfg_m or codebook_K != cfg_K:
+        logger.warning(
+            "override_model_codebooks_shape config_m=%s config_K=%s codebook_m=%s codebook_K=%s",
+            cfg_m,
+            cfg_K,
+            codebook_m,
+            codebook_K,
+        )
     logger.info("init_model start")
     t0 = time.perf_counter()
     model = CFMModel.from_codebooks(
@@ -361,8 +393,8 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
         n_layers=int(model_cfg["n_layers"]),
         n_heads=int(model_cfg["n_heads"]),
         max_seq_len=int(model_cfg["max_seq_len"]),
-        m=int(model_cfg["m"]),
-        K=int(model_cfg["K"]),
+        m=codebook_m,
+        K=codebook_K,
         backbone=model_cfg.get("backbone", "tiny"),
         hf_model_name=model_cfg.get("hf_model_name"),
     )
