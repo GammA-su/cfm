@@ -9,7 +9,7 @@ import threading
 import time
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from forge_omega_500.runtime import (
     DEFAULT_CPU_THREADS,
@@ -92,6 +92,52 @@ def _ensure_file_logger(out_dir: Path) -> None:
     logger.addHandler(handler)
     logger.info("file_logging_enabled path=%s", log_path)
     _FILE_LOG_READY = True
+
+
+def _atomic_torch_save(payload: Dict[str, object], path: Path) -> None:
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    torch.save(payload, tmp_path)
+    tmp_path.replace(path)
+
+
+def _save_checkpoint(
+    ckpt_dir: Path,
+    step: int,
+    model: CFMModel,
+    optimizer: torch.optim.Optimizer,
+    rng: random.Random,
+    epoch_idx: int,
+) -> Path:
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": 1,
+        "step": int(step),
+        "epoch_idx": int(epoch_idx),
+        "model": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "rng_state": rng.getstate(),
+        "np_state": np.random.get_state(),
+        "torch_state": torch.random.get_rng_state(),
+        "torch_cuda_state": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+    }
+    path = ckpt_dir / "latest.pt"
+    _atomic_torch_save(payload, path)
+    logger.info("checkpoint_saved path=%s step=%s", path, step)
+    return path
+
+
+def _find_latest_checkpoint(ckpt_dir: Path) -> Optional[Path]:
+    latest = ckpt_dir / "latest.pt"
+    if latest.exists():
+        return latest
+    return None
+
+
+def _load_checkpoint(path: Path, device: torch.device) -> Dict[str, object]:
+    try:
+        return torch.load(path, map_location=device, weights_only=False)
+    except TypeError:
+        return torch.load(path, map_location=device)
 
 
 def _load_factbank(factbank_dir: Path) -> List[Dict[str, object]]:
@@ -427,6 +473,7 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
 
     out_dir = Path("out")
     _ensure_file_logger(out_dir)
+    ckpt_dir = out_dir / "ckpt"
 
     factbank_dir = Path(data_cfg["factbank_dir"])
     codes_dir = Path(data_cfg["codes_dir"])
@@ -515,6 +562,40 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
     epoch_label_counts: Counter = Counter()
     epoch_code_counts: List[Counter] = [Counter() for _ in range(int(model_cfg["m"]))]
 
+    resume = bool(train_cfg.get("resume", True))
+    checkpoint_every = int(train_cfg.get("checkpoint_every", 1000))
+    checkpoint_on_start = bool(train_cfg.get("checkpoint_on_start", True))
+    start_step = 0
+    if resume:
+        ckpt_path = _find_latest_checkpoint(ckpt_dir)
+        if ckpt_path:
+            logger.info("resume_checkpoint start path=%s", ckpt_path)
+            checkpoint = _load_checkpoint(ckpt_path, device=device)
+            if "model" in checkpoint:
+                model.load_state_dict(checkpoint["model"])
+            else:
+                logger.warning("resume_checkpoint missing=model_state path=%s", ckpt_path)
+            if "optimizer" in checkpoint:
+                optimizer.load_state_dict(checkpoint["optimizer"])
+            else:
+                logger.warning("resume_checkpoint missing=optimizer_state path=%s", ckpt_path)
+            start_step = int(checkpoint.get("step", 0))
+            if "epoch_idx" in checkpoint:
+                epoch_idx = int(checkpoint["epoch_idx"])
+            else:
+                epoch_idx = start_step // steps_per_epoch
+            if "rng_state" in checkpoint:
+                rng.setstate(checkpoint["rng_state"])
+            if "np_state" in checkpoint:
+                np.random.set_state(checkpoint["np_state"])
+            if "torch_state" in checkpoint:
+                torch.random.set_rng_state(checkpoint["torch_state"])
+            if torch_info.get("torch_cuda") and checkpoint.get("torch_cuda_state"):
+                torch.cuda.set_rng_state_all(checkpoint["torch_cuda_state"])
+            logger.info("resume_checkpoint done step=%s epoch=%s", start_step, epoch_idx)
+        else:
+            logger.info("resume_checkpoint skipped reason=no_checkpoint")
+
     model.train()
     log_every = int(train_cfg["log_every"])
     time_log_interval = float(train_cfg.get("time_log_interval", 30.0))
@@ -542,9 +623,11 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
     )
     train_start = time.perf_counter()
     last_log_time = train_start
-    last_log_step = 0
+    last_log_step = start_step
     next_time_log = train_start + time_log_interval
-    for step in range(steps):
+    if checkpoint_on_start and start_step == 0:
+        _save_checkpoint(ckpt_dir, step=0, model=model, optimizer=optimizer, rng=rng, epoch_idx=epoch_idx)
+    for step in range(start_step, steps):
         batch = _sample_fact_batch(
             facts,
             relation_ids,
@@ -620,6 +703,16 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
         loss.backward()
         optimizer.step()
 
+        if checkpoint_every > 0 and (step + 1) % checkpoint_every == 0:
+            _save_checkpoint(
+                ckpt_dir,
+                step=step + 1,
+                model=model,
+                optimizer=optimizer,
+                rng=rng,
+                epoch_idx=epoch_idx,
+            )
+
         with torch.no_grad():
             pred_codes = torch.stack([logits.argmax(dim=-1) for logits in addr_logits], dim=1).cpu().tolist()
         for code_tuple in pred_codes:
@@ -673,6 +766,9 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
             epoch_code_counts = [Counter() for _ in range(int(model_cfg["m"]))]
 
     logger.info("training done time=%.2fs", time.perf_counter() - train_start)
+    _save_checkpoint(ckpt_dir, step=steps, model=model, optimizer=optimizer, rng=rng, epoch_idx=epoch_idx)
+    torch.save(model.state_dict(), ckpt_dir / "model.pt")
+    logger.info("checkpoint_saved path=%s", ckpt_dir / "model.pt")
     logger.info("eval start")
     report = {
         "code_em": _compute_code_em(model, examples, tokenizer, max_seq_len=max_seq_len),
