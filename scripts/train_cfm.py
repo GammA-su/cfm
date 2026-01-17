@@ -61,6 +61,8 @@ import torch
 _set_startup_stage("import torch.nn.functional")
 import torch.nn.functional as F
 from torch.nn.utils import clip_grad_norm_
+_set_startup_stage("import torch.cuda.amp")
+from torch.cuda.amp import autocast, GradScaler
 _set_startup_stage("import typer")
 import typer
 _set_startup_stage("import yaml")
@@ -74,10 +76,14 @@ from forge_omega_500.model.utils import SimpleTokenizer, pad_sequences, set_seed
 
 console = Console()
 logger = setup_logger("train_cfm")
+
 app = typer.Typer(add_completion=False)
 _FILE_LOG_READY = False
 
-_set_startup_stage("ready")
+_ORBIT_ZERO_WARNING_THRESHOLD = 12
+_ORBIT_ZERO_WARNING_SHOWN = False
+_ORBIT_ZERO_ZERO_STREAK = 0
+_FIRST_NONFINITE_COMPONENT_LOGGED = False
 
 
 def _ensure_file_logger(out_dir: Path) -> None:
@@ -121,10 +127,12 @@ def _save_checkpoint(
         "torch_state": torch.random.get_rng_state(),
         "torch_cuda_state": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
     }
-    path = ckpt_dir / "latest.pt"
-    _atomic_torch_save(payload, path)
-    logger.info("checkpoint_saved path=%s step=%s", path, step)
-    return path
+    step_path = ckpt_dir / f"step_{step:06d}.pt"
+    _atomic_torch_save(payload, step_path)
+    latest_path = ckpt_dir / "latest.pt"
+    _atomic_torch_save(payload, latest_path)
+    logger.info("checkpoint_saved step=%s path=%s", step, step_path)
+    return latest_path
 
 
 def _find_latest_checkpoint(ckpt_dir: Path) -> Optional[Path]:
@@ -146,6 +154,63 @@ def _move_optimizer_state(optimizer: torch.optim.Optimizer, device: torch.device
         for key, value in list(state.items()):
             if torch.is_tensor(value):
                 state[key] = value.to(device)
+
+
+def _tensor_stats(tensor: torch.Tensor) -> Dict[str, object]:
+    stats: Dict[str, object] = {}
+    if tensor.numel() == 0:
+        stats.update(min=None, max=None, mean=None, has_nan=False, has_inf=False)
+        return stats
+    data = tensor.detach()
+    has_nan = bool(torch.isnan(data).any())
+    has_inf = bool(torch.isinf(data).any())
+    safe = torch.nan_to_num(data.float(), nan=0.0, posinf=1e6, neginf=-1e6)
+    stats["min"] = float(safe.min().item())
+    stats["max"] = float(safe.max().item())
+    stats["mean"] = float(safe.mean().item())
+    stats["has_nan"] = has_nan
+    stats["has_inf"] = has_inf
+    return stats
+
+
+def _save_nonfinite_debug(
+    step: int,
+    batch: List[Dict[str, object]],
+    code_targets: torch.Tensor,
+    orbit_pairs: int,
+    addr_logits: List[torch.Tensor],
+    gen_logits: torch.Tensor,
+    nonfinite_components: List[str],
+    component_values: Dict[str, float],
+) -> None:
+    debug_dir = Path("out") / "debug"
+    debug_dir.mkdir(parents=True, exist_ok=True)
+    limit = min(len(batch), 4)
+    snapshot = {
+        "step": step,
+        "orbit_pairs": orbit_pairs,
+        "nonfinite_components": nonfinite_components,
+        "component_values": component_values,
+        "prompts": [str(batch[i]["prompt"]) for i in range(limit)],
+        "codes": [code_targets[i].cpu().tolist() for i in range(limit)],
+        "logits": {
+            "addr": [_tensor_stats(logits) for logits in addr_logits],
+            "gen": _tensor_stats(gen_logits),
+        },
+        "timestamp": time.time(),
+    }
+    path = debug_dir / f"nonfinite_step_{step:06d}.json"
+    path.write_text(json.dumps(snapshot, indent=2))
+
+
+def _compute_grad_norm(model: torch.nn.Module) -> float:
+    total = 0.0
+    for param in model.parameters():
+        if param.grad is None:
+            continue
+        norm = param.grad.detach().float().norm(2)
+        total += float(norm.item() ** 2)
+    return math.sqrt(total) if total > 0 else 0.0
 
 
 def _load_factbank(factbank_dir: Path) -> List[Dict[str, object]]:
@@ -273,24 +338,26 @@ def _orbit_consistency_loss(
     fact_ids: List[str],
     is_cloze: List[bool],
     cloze_boost: float,
-) -> torch.Tensor:
+) -> Tuple[torch.Tensor, int]:
     device = addr_logits[0].device
     groups: Dict[str, List[int]] = defaultdict(list)
     for idx, fact_id in enumerate(fact_ids):
         groups[fact_id].append(idx)
     loss = torch.tensor(0.0, device=device)
+    pair_count = 0
     for indices in groups.values():
         if len(indices) < 2:
             continue
+        pair_count += 1
         cloze_fraction = sum(1 for i in indices if is_cloze[i]) / len(indices)
         group_weight = 1.0 + (cloze_boost - 1.0) * cloze_fraction
         for logits in addr_logits:
-            group_logits = logits[indices]
-            log_probs = F.log_softmax(group_logits, dim=-1)
+            group_logits = logits[indices].float()
+            log_probs = torch.log_softmax(group_logits, dim=-1)
             probs = torch.softmax(group_logits, dim=-1)
-            mean_probs = probs.mean(dim=0, keepdim=True)
+            mean_probs = probs.mean(dim=0, keepdim=True).clamp(min=1e-8)
             loss = loss + group_weight * F.kl_div(log_probs, mean_probs.expand_as(log_probs), reduction="batchmean")
-    return loss
+    return loss, pair_count
 
 
 def _batch_code_entropy(addr_logits: List[torch.Tensor]) -> torch.Tensor:
@@ -459,6 +526,7 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
     cfg = yaml.safe_load(config.read_text())
     seed = int(cfg["seed"])
     set_seed(seed)
+    global _ORBIT_ZERO_WARNING_SHOWN, _ORBIT_ZERO_ZERO_STREAK, _FIRST_NONFINITE_COMPONENT_LOGGED
 
     runtime_cfg = cfg.get("runtime", {})
     cpu_threads = int(runtime_cfg.get("cpu_threads", DEFAULT_CPU_THREADS))
@@ -553,11 +621,14 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
     if cloze_ratio < 0.0 or cloze_ratio > 1.0:
         logger.warning("cloze_ratio_out_of_range value=%.3f; clamping to [0,1]", cloze_ratio)
         cloze_ratio = min(max(cloze_ratio, 0.0), 1.0)
+    amp_requested = bool(train_cfg.get("amp", False))
+    amp_enabled = amp_requested and bool(torch_info.get("torch_cuda"))
+    grad_clip_norm = float(train_cfg.get("grad_clip_norm", 1.0))
+    max_nan_skips = int(train_cfg.get("max_nan_skips", 3))
     cloze_addr_weight = float(train_cfg.get("cloze_addr_weight", 2.0))
     cloze_orbit_boost = float(train_cfg.get("cloze_orbit_boost", 2.0))
     orbit_consistency_weight = float(train_cfg.get("orbit_consistency_weight", 0.2))
     entropy_weight = float(train_cfg.get("entropy_weight", 0.01))
-    grad_clip = float(train_cfg.get("grad_clip", 0.0))
 
     facts = _build_fact_index(records, answer_codes)
     relation_ids, relation_to_indices = _build_relation_index(facts)
@@ -635,12 +706,21 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
         orbit_consistency_weight,
         entropy_weight,
     )
+    logger.info(
+        "amp_enabled=%s grad_clip_norm=%.4f max_nan_skips=%s",
+        amp_enabled,
+        grad_clip_norm,
+        max_nan_skips,
+    )
     train_start = time.perf_counter()
     last_log_time = train_start
     last_log_step = start_step
     next_time_log = train_start + time_log_interval
     if checkpoint_on_start and start_step == 0:
         _save_checkpoint(ckpt_dir, step=0, model=model, optimizer=optimizer, rng=rng, epoch_idx=epoch_idx)
+    scaler = GradScaler(enabled=amp_enabled)
+    nan_skip_count = 0
+
     for step in range(start_step, steps):
         batch = _sample_fact_batch(
             facts,
@@ -661,7 +741,6 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
         ) = _prepare_batch(batch, tokenizer, max_seq_len)
         fact_ids = [ex["fact_id"] for ex in batch]
         is_cloze = [bool(ex["is_cloze"]) for ex in batch]
-
         input_ids = input_ids.to(device)
         attention_masks = attention_masks.to(device)
         labels = labels.to(device)
@@ -669,8 +748,13 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
         prompt_masks = prompt_masks.to(device)
         code_targets = code_targets.to(device)
 
-        addr_logits, _, _ = model.encode_prompt(prompt_ids, prompt_masks)
-        addr_loss = 0.0
+        with autocast(enabled=amp_enabled):
+            addr_logits_raw, _, _ = model.encode_prompt(prompt_ids, prompt_masks)
+            _, gen_logits_raw = model.forward_generation(input_ids, attention_masks, code_targets)
+        addr_logits = [logits.float() for logits in addr_logits_raw]
+        gen_logits = gen_logits_raw.float()
+
+        addr_loss = torch.tensor(0.0, device=device)
         for i, logits in enumerate(addr_logits):
             weights = torch.tensor(
                 [cloze_addr_weight if flag else 1.0 for flag in is_cloze],
@@ -680,12 +764,23 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
             per_item = F.cross_entropy(logits, code_targets[:, i], reduction="none")
             addr_loss = addr_loss + (per_item * weights).mean()
 
-        _, logits = model.forward_generation(input_ids, attention_masks, code_targets)
         prefix_pad = torch.full((labels.size(0), 1), -100, device=labels.device, dtype=labels.dtype)
         labels = torch.cat([prefix_pad, labels], dim=1)
-        gen_loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), labels.reshape(-1), ignore_index=-100)
+        gen_loss = F.cross_entropy(gen_logits.reshape(-1, gen_logits.size(-1)), labels.reshape(-1), ignore_index=-100)
 
-        orbit_loss = _orbit_consistency_loss(addr_logits, fact_ids, is_cloze, cloze_orbit_boost) * orbit_consistency_weight
+        orbit_loss, orbit_pairs_in_batch = _orbit_consistency_loss(addr_logits, fact_ids, is_cloze, cloze_orbit_boost)
+        orbit_loss = orbit_loss * orbit_consistency_weight
+        if orbit_pairs_in_batch == 0:
+            _ORBIT_ZERO_ZERO_STREAK += 1
+            if _ORBIT_ZERO_ZERO_STREAK >= _ORBIT_ZERO_WARNING_THRESHOLD and not _ORBIT_ZERO_WARNING_SHOWN:
+                logger.warning(
+                    "orbit_pairs_zero streak=%s steps without pairs (step=%s)",
+                    _ORBIT_ZERO_ZERO_STREAK,
+                    step + 1,
+                )
+                _ORBIT_ZERO_WARNING_SHOWN = True
+        else:
+            _ORBIT_ZERO_ZERO_STREAK = 0
         entropy_reg = _batch_code_entropy(addr_logits)
 
         contrast_loss = torch.tensor(0.0, device=device)
@@ -713,6 +808,14 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
 
         loss = addr_loss + gen_loss + contrast_loss + orbit_loss - entropy_weight * entropy_reg
 
+        component_map = {
+            "addr": addr_loss,
+            "gen": gen_loss,
+            "contrast": contrast_loss,
+            "orbit": orbit_loss,
+            "entropy": entropy_reg,
+        }
+        nonfinite_components = [name for name, tensor in component_map.items() if not torch.isfinite(tensor)]
         if not torch.isfinite(loss):
             logger.warning(
                 "nonfinite_loss step=%s addr=%s gen=%s contrast=%s orbit=%s entropy=%s",
@@ -723,14 +826,53 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
                 orbit_loss.item(),
                 entropy_reg.item(),
             )
+            if nonfinite_components and not _FIRST_NONFINITE_COMPONENT_LOGGED:
+                logger.warning(
+                    "first_nonfinite_components step=%s components=%s",
+                    step + 1,
+                    nonfinite_components,
+                )
+                _FIRST_NONFINITE_COMPONENT_LOGGED = True
+            _save_nonfinite_debug(
+                step + 1,
+                batch,
+                code_targets,
+                orbit_pairs_in_batch,
+                addr_logits,
+                gen_logits,
+                nonfinite_components,
+                {name: float(tensor.detach().cpu().item()) for name, tensor in component_map.items()},
+            )
+            nan_skip_count += 1
+            if nan_skip_count >= max_nan_skips:
+                _save_checkpoint(
+                    ckpt_dir,
+                    step=step + 1,
+                    model=model,
+                    optimizer=optimizer,
+                    rng=rng,
+                    epoch_idx=epoch_idx,
+                )
+                logger.error("max_nan_skips reached step=%s exit=1", step + 1)
+                sys.exit(1)
             optimizer.zero_grad()
             continue
 
         optimizer.zero_grad()
-        loss.backward()
-        if grad_clip > 0.0:
-            clip_grad_norm_(model.parameters(), grad_clip)
-        optimizer.step()
+        if amp_enabled:
+            scaler.scale(loss).backward()
+        else:
+            loss.backward()
+        if grad_clip_norm > 0.0:
+            grad_norm = clip_grad_norm_(model.parameters(), grad_clip_norm)
+        else:
+            grad_norm = _compute_grad_norm(model)
+        if amp_enabled:
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            optimizer.step()
+        nan_skip_count = 0
 
         if checkpoint_every > 0 and (step + 1) % checkpoint_every == 0:
             _save_checkpoint(
@@ -756,8 +898,10 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
             steps_since = (step + 1) - last_log_step
             step_time = (now - last_log_time) / max(steps_since, 1)
             avg_time = (now - train_start) / (step + 1)
+            current_lr = optimizer.param_groups[0]["lr"]
+            amp_flag = "on" if amp_enabled else "off"
             logger.info(
-                "train step=%s/%s loss=%.4f addr=%.4f gen=%.4f contrast=%.4f orbit=%.4f entropy=%.4f neg_hard=%s step_s=%.3f avg_s=%.3f",
+                "train step=%s/%s loss=%.4f addr=%.4f gen=%.4f contrast=%.4f orbit=%.4f entropy=%.4f orbit_pairs=%s lr=%.6g grad_norm=%.4f amp=%s neg_hard=%s step_s=%.3f avg_s=%.3f",
                 step + 1,
                 steps,
                 loss.item(),
@@ -766,12 +910,16 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
                 contrast_loss.item(),
                 orbit_loss.item(),
                 entropy_reg.item(),
+                orbit_pairs_in_batch,
+                current_lr,
+                grad_norm,
+                amp_flag,
                 neg_from_hard,
                 step_time,
                 avg_time,
             )
             console.print(
-                f"step {step+1}/{steps} loss={loss.item():.4f} addr={addr_loss.item():.4f} gen={gen_loss.item():.4f} contrast={contrast_loss.item():.4f} orbit={orbit_loss.item():.4f} entropy={entropy_reg.item():.4f}"
+                f"step {step+1}/{steps} loss={loss.item():.4f} addr={addr_loss.item():.4f} gen={gen_loss.item():.4f} contrast={contrast_loss.item():.4f} orbit={orbit_loss.item():.4f} entropy={entropy_reg.item():.4f} orbit_pairs={orbit_pairs_in_batch}"
             )
             last_log_time = now
             last_log_step = step + 1

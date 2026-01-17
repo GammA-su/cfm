@@ -43,14 +43,17 @@ rvq:
 train:
   batch_size: 64
   steps: 60000
-  lr: 3.0e-4
+  lr: 7.0e-05
   weight_decay: 0.01
   log_every: 20
   contrast_margin: 0.2
   checkpoint_every: 1000
   checkpoint_on_start: true
   resume: true
-  grad_clip: 1.0
+  amp: false
+  grad_clip_norm: 1.0
+  max_nan_skips: 3
+  orbit_consistency_weight: 0.1
 
 inference:
   max_gen_tokens: 8

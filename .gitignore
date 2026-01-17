@@ -6,3 +6,5 @@ data/
 out/
 .conda
 .conda_installer
+.pytest_cache/
+out/
