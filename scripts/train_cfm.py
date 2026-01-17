@@ -60,6 +60,7 @@ _set_startup_stage("import torch")
 import torch
 _set_startup_stage("import torch.nn.functional")
 import torch.nn.functional as F
+from torch.nn.utils import clip_grad_norm_
 _set_startup_stage("import typer")
 import typer
 _set_startup_stage("import yaml")
@@ -556,6 +557,7 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
     cloze_orbit_boost = float(train_cfg.get("cloze_orbit_boost", 2.0))
     orbit_consistency_weight = float(train_cfg.get("orbit_consistency_weight", 0.2))
     entropy_weight = float(train_cfg.get("entropy_weight", 0.01))
+    grad_clip = float(train_cfg.get("grad_clip", 0.0))
 
     facts = _build_fact_index(records, answer_codes)
     relation_ids, relation_to_indices = _build_relation_index(facts)
@@ -711,8 +713,23 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
 
         loss = addr_loss + gen_loss + contrast_loss + orbit_loss - entropy_weight * entropy_reg
 
+        if not torch.isfinite(loss):
+            logger.warning(
+                "nonfinite_loss step=%s addr=%s gen=%s contrast=%s orbit=%s entropy=%s",
+                step + 1,
+                addr_loss.item(),
+                gen_loss.item(),
+                contrast_loss.item(),
+                orbit_loss.item(),
+                entropy_reg.item(),
+            )
+            optimizer.zero_grad()
+            continue
+
         optimizer.zero_grad()
         loss.backward()
+        if grad_clip > 0.0:
+            clip_grad_norm_(model.parameters(), grad_clip)
         optimizer.step()
 
         if checkpoint_every > 0 and (step + 1) % checkpoint_every == 0:

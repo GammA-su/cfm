@@ -50,6 +50,7 @@ train:
   checkpoint_every: 1000
   checkpoint_on_start: true
   resume: true
+  grad_clip: 1.0
 
 inference:
   max_gen_tokens: 8
