@@ -164,18 +164,35 @@ def _iter_lama_records(
                 data = json.loads(raw.decode("utf-8"))
                 if cfg_name == "trex":
                     pred = relations.get(str(data.get("predicate_id", "")), {})
+                    predicate_id = _first_value(data, ("predicate_id", "relation_id", "relation"))
+                    sub_uri = _first_value(data, ("sub_uri", "subj_uri", "subject_uri"))
+                    obj_uri = _first_value(data, ("obj_uri", "object_uri"))
+                    gold_label = _first_value(data, ("obj_label", "object_label", "obj", "answer"))
                     for evidence in data.get("evidences", []):
                         yield {
-                            "masked_sentence": str(evidence.get("masked_sentence", "")),
+                            "masked_sentence": _first_value(evidence, ("masked_sentence", "masked_sentences")),
                             "template": str(pred.get("template", "")),
+                            "predicate_id": predicate_id,
                             "sub_label": str(data.get("sub_label", "")),
                             "obj_label": str(data.get("obj_label", "")),
+                            "sub_uri": sub_uri,
+                            "obj_uri": obj_uri,
+                            "gold_label": gold_label,
                         }
                         yielded += 1
                         if max_samples and yielded >= max_samples:
                             return
                 else:
-                    yield data
+                    record = dict(data)
+                    record["masked_sentence"] = _first_value(data, ("masked_sentence", "masked_sentences"))
+                    predicate_id = _first_value(data, ("predicate_id", "relation_id", "relation"))
+                    record["predicate_id"] = predicate_id
+                    if cfg_name == "google_re" and not predicate_id:
+                        record["literal_only"] = True
+                    record["sub_uri"] = _first_value(data, ("sub_uri", "subj_uri", "subject_uri"))
+                    record["obj_uri"] = _first_value(data, ("obj_uri", "object_uri"))
+                    record["gold_label"] = _first_value(data, ("obj_label", "object_label", "obj", "answer"))
+                    yield record
                     yielded += 1
                     if max_samples and yielded >= max_samples:
                         return
@@ -212,6 +229,14 @@ def _iter_field_values(value: object) -> List[str]:
         return _iter_field_values(value.tolist())
     text = str(value).strip()
     return [text] if text else []
+
+
+def _first_value(row: Dict[str, object], keys: Iterable[str]) -> str:
+    for key in keys:
+        values = _iter_field_values(row.get(key))
+        if values:
+            return values[0]
+    return ""
 
 
 def _extract_masked_sentence(example: Dict[str, object]) -> Tuple[str, str]:
@@ -288,6 +313,46 @@ def _normalize_for_em(pred: str, gold: str) -> Tuple[str, str]:
             pred_tokens = pred_norm.split()
             pred_norm = pred_tokens[0] if pred_tokens else ""
     return pred_norm, gold_norm
+
+
+def _is_numeric_literal(text: str) -> bool:
+    normalized = _normalize_answer(text)
+    return normalized.isdigit()
+
+
+def _load_qid_to_label(path: Path) -> Dict[str, str]:
+    if not path.exists():
+        logger.warning("qid_to_label_missing path=%s", path)
+        return {}
+    try:
+        df = pd.read_parquet(path)
+    except Exception as exc:
+        logger.warning("qid_to_label_load_failed path=%s err=%s", path, exc)
+        return {}
+    mapping: Dict[str, str] = {}
+    for _, row in df.iterrows():
+        qid = str(row.get("qid", "")).strip()
+        label = str(row.get("label", "")).strip()
+        if qid and label and qid not in mapping:
+            mapping[qid] = label
+    logger.info("qid_to_label_loaded entries=%s", len(mapping))
+    return mapping
+
+
+def _map_pred_to_label(pred: str, qid_to_label: Dict[str, str]) -> Tuple[str, str]:
+    raw = pred.strip()
+    if not raw:
+        return pred, ""
+    qid = ""
+    if raw.isdigit():
+        qid = f"Q{raw}"
+    elif raw.startswith("Q") and raw[1:].isdigit():
+        qid = raw
+    if qid:
+        label = qid_to_label.get(qid, "")
+        if label:
+            return label, qid
+    return pred, qid
 
 
 def _decode_pred(tokenizer: SimpleTokenizer, token_ids: List[int]) -> str:
@@ -410,6 +475,8 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
     logger.info("model_to_device done device=%s", device.type)
 
     code_to_answer = _build_code_to_answer_map(codes_dir / "code_to_label.parquet")
+    factbank_dir = Path(data_cfg["factbank_dir"])
+    qid_to_label = _load_qid_to_label(factbank_dir / "qid_to_label.parquet")
 
     local_files_only = bool(data_cfg.get("local_files_only", False))
     cache_dir = Path(data_cfg.get("hf_cache_dir", ".cache/huggingface"))
@@ -456,6 +523,8 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
         logger.info("eval_config=%s samples=%s", cfg_name, len(ds))
         confidences = []
         accuracies = []
+        accuracies_uri = []
+        accuracies_text = []
         predictions = []
         log_every = int(eval_cfg.get("log_every", 50))
         time_log_interval = float(eval_cfg.get("time_log_interval", 30.0))
@@ -515,12 +584,37 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
                 mapping_hit,
             )
             gold = _gold_answer(example)
-            pred_norm, gold_norm = _normalize_for_em(pred_text, gold)
-            acc = 1.0 if pred_norm == gold_norm else 0.0
+            gold_uri = _first_value(example, ("obj_uri", "object_uri"))
+            mapped_label, pred_qid = _map_pred_to_label(pred_text, qid_to_label)
+            acc_uri = None
+            acc_text = None
+            if gold_uri:
+                acc_uri = 1.0 if pred_qid and pred_qid == gold_uri else 0.0
+                acc = acc_uri
+            else:
+                if _is_numeric_literal(gold):
+                    pred_norm = _normalize_answer(pred_text)
+                    gold_norm = _normalize_answer(gold)
+                else:
+                    pred_norm, gold_norm = _normalize_for_em(pred_text, gold)
+                acc_text = 1.0 if pred_norm == gold_norm else 0.0
+                acc = acc_text
 
             confidences.append(float(conf.item()))
             accuracies.append(acc)
-            predictions.append({"prompt": prompt, "pred": pred_text, "gold": gold, "conf": float(conf.item())})
+            if acc_uri is not None:
+                accuracies_uri.append(acc_uri)
+            if acc_text is not None:
+                accuracies_text.append(acc_text)
+            predictions.append({
+                "prompt": prompt,
+                "pred": pred_text,
+                "pred_mapped": mapped_label if mapped_label != pred_text else "",
+                "pred_qid": pred_qid,
+                "gold": gold,
+                "gold_uri": gold_uri,
+                "conf": float(conf.item()),
+            })
             processed += 1
             now = time.perf_counter()
             log_due = processed % log_every == 0 or now >= next_time_log
@@ -542,12 +636,23 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
                 if now >= next_time_log:
                     next_time_log = now + time_log_interval
 
+        acc_overall = float(np.mean(accuracies)) if accuracies else 0.0
+        acc_uri = float(np.mean(accuracies_uri)) if accuracies_uri else 0.0
+        acc_text = float(np.mean(accuracies_text)) if accuracies_text else 0.0
         report[cfg_name] = {
-            "accuracy": float(np.mean(accuracies)) if accuracies else 0.0,
+            "accuracy": acc_overall,
+            "accuracy_uri": acc_uri,
+            "accuracy_text": acc_text,
             "calibration": calibration_curve(confidences, accuracies, bins=int(eval_cfg["calib_bins"])),
             "samples": predictions[:5],
         }
-        logger.info("eval_config done cfg=%s accuracy=%.4f", cfg_name, report[cfg_name]["accuracy"])
+        logger.info(
+            "eval_config done cfg=%s accuracy=%.4f acc_uri=%.4f acc_text=%.4f",
+            cfg_name,
+            acc_overall,
+            acc_uri,
+            acc_text,
+        )
 
     out_path = out_dir / "lama_report.json"
     out_path.write_text(json.dumps(report, indent=2))

@@ -11,9 +11,8 @@ src/forge_omega_500/data/__init__.py
 src/forge_omega_500/data/build_factbank.py
 src/forge_omega_500/data/embeddings.py
 src/forge_omega_500/data/hf_ingest.py
-src/forge_omega_500/data/negatives.py
-src/forge_omega_500/data/orbit.py
 src/forge_omega_500/data/rvq.py
+src/forge_omega_500/data/templates.py
 src/forge_omega_500/eval/__init__.py
 src/forge_omega_500/eval/metrics.py
 src/forge_omega_500/model/__init__.py
@@ -22,4 +21,5 @@ src/forge_omega_500/model/tiny_decoder.py
 src/forge_omega_500/model/utils.py
 tests/test_determinism.py
 tests/test_negative_separation.py
+tests/test_nonempty_pred.py
 tests/test_orbit_invariance.py

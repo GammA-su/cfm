@@ -7,7 +7,7 @@ import random
 import sys
 import threading
 import time
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -84,6 +84,9 @@ _ORBIT_ZERO_WARNING_THRESHOLD = 12
 _ORBIT_ZERO_WARNING_SHOWN = False
 _ORBIT_ZERO_ZERO_STREAK = 0
 _FIRST_NONFINITE_COMPONENT_LOGGED = False
+_COLLAPSE_TOP1_THRESHOLD = 0.5
+_COLLAPSE_UNIQUE_THRESHOLD = 0.05
+_COLLAPSE_ENTROPY_THRESHOLD = 0.2
 
 
 def _ensure_file_logger(out_dir: Path) -> None:
@@ -340,10 +343,11 @@ def _orbit_consistency_loss(
     cloze_boost: float,
 ) -> Tuple[torch.Tensor, int]:
     device = addr_logits[0].device
+    dtype = addr_logits[0].dtype
     groups: Dict[str, List[int]] = defaultdict(list)
     for idx, fact_id in enumerate(fact_ids):
         groups[fact_id].append(idx)
-    loss = torch.tensor(0.0, device=device)
+    loss = torch.tensor(0.0, device=device, dtype=dtype)
     pair_count = 0
     for indices in groups.values():
         if len(indices) < 2:
@@ -357,6 +361,10 @@ def _orbit_consistency_loss(
             probs = torch.softmax(group_logits, dim=-1)
             mean_probs = probs.mean(dim=0, keepdim=True).clamp(min=1e-8)
             loss = loss + group_weight * F.kl_div(log_probs, mean_probs.expand_as(log_probs), reduction="batchmean")
+    if pair_count == 0:
+        return torch.zeros((), device=device, dtype=dtype), 0
+    loss = loss / max(pair_count, 1)
+    loss = torch.nan_to_num(loss, nan=0.0, posinf=1e4, neginf=1e4)
     return loss, pair_count
 
 
@@ -629,6 +637,10 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
     cloze_orbit_boost = float(train_cfg.get("cloze_orbit_boost", 2.0))
     orbit_consistency_weight = float(train_cfg.get("orbit_consistency_weight", 0.2))
     entropy_weight = float(train_cfg.get("entropy_weight", 0.01))
+    obj_prior_weight = float(train_cfg.get("obj_prior_weight", 0.0))
+    collapse_window = int(train_cfg.get("collapse_window", 50))
+    nonfinite_lr_reduce_every = int(train_cfg.get("nonfinite_lr_reduce_every", 0))
+    nonfinite_lr_reduce_factor = float(train_cfg.get("nonfinite_lr_reduce_factor", 0.5))
 
     facts = _build_fact_index(records, answer_codes)
     relation_ids, relation_to_indices = _build_relation_index(facts)
@@ -641,6 +653,11 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
     epoch_idx = 0
     epoch_label_counts: Counter = Counter()
     epoch_code_counts: List[Counter] = [Counter() for _ in range(int(model_cfg["m"]))]
+    collapse_window = max(0, collapse_window)
+    pred_window: deque[list[str]] = deque(maxlen=collapse_window) if collapse_window > 0 else deque()
+    pred_counter: Counter = Counter()
+    pred_total = 0
+    collapse_active = False
 
     resume = bool(train_cfg.get("resume", True))
     checkpoint_every = int(train_cfg.get("checkpoint_every", 1000))
@@ -700,11 +717,12 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
         len(relation_ids),
     )
     logger.info(
-        "loss_weights cloze_addr=%.2f cloze_orbit_boost=%.2f orbit_weight=%.3f entropy_weight=%.4f",
+        "loss_weights cloze_addr=%.2f cloze_orbit_boost=%.2f orbit_weight=%.3f entropy_weight=%.4f obj_prior_weight=%.4f",
         cloze_addr_weight,
         cloze_orbit_boost,
         orbit_consistency_weight,
         entropy_weight,
+        obj_prior_weight,
     )
     logger.info(
         "amp_enabled=%s grad_clip_norm=%.4f max_nan_skips=%s",
@@ -720,6 +738,7 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
         _save_checkpoint(ckpt_dir, step=0, model=model, optimizer=optimizer, rng=rng, epoch_idx=epoch_idx)
     scaler = GradScaler(enabled=amp_enabled)
     nan_skip_count = 0
+    nonfinite_events = 0
 
     for step in range(start_step, steps):
         batch = _sample_fact_batch(
@@ -769,7 +788,12 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
         gen_loss = F.cross_entropy(gen_logits.reshape(-1, gen_logits.size(-1)), labels.reshape(-1), ignore_index=-100)
 
         orbit_loss, orbit_pairs_in_batch = _orbit_consistency_loss(addr_logits, fact_ids, is_cloze, cloze_orbit_boost)
-        orbit_loss = orbit_loss * orbit_consistency_weight
+        orbit_loss = torch.nan_to_num(
+            orbit_loss * orbit_consistency_weight,
+            nan=0.0,
+            posinf=1e4,
+            neginf=1e4,
+        )
         if orbit_pairs_in_batch == 0:
             _ORBIT_ZERO_ZERO_STREAK += 1
             if _ORBIT_ZERO_ZERO_STREAK >= _ORBIT_ZERO_WARNING_THRESHOLD and not _ORBIT_ZERO_WARNING_SHOWN:
@@ -806,7 +830,22 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
         v_neg = model.decode_value(neg_codes)
         contrast_loss = contrastive_margin_loss(v_pos, v_neg, margin=float(train_cfg["contrast_margin"]))
 
-        loss = addr_loss + gen_loss + contrast_loss + orbit_loss - entropy_weight * entropy_reg
+        obj_prior_loss = torch.tensor(0.0, device=device)
+        if obj_prior_weight > 0.0 and collapse_active:
+            k = int(model_cfg["K"])
+            for logits in addr_logits:
+                probs = logits.softmax(dim=-1).mean(dim=0)
+                obj_prior_loss = obj_prior_loss + (probs * (probs + 1e-9).log()).sum() + math.log(k)
+            obj_prior_loss = obj_prior_loss / max(len(addr_logits), 1)
+
+        loss = (
+            addr_loss
+            + gen_loss
+            + contrast_loss
+            + orbit_loss
+            - entropy_weight * entropy_reg
+            + obj_prior_weight * obj_prior_loss
+        )
 
         component_map = {
             "addr": addr_loss,
@@ -814,6 +853,7 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
             "contrast": contrast_loss,
             "orbit": orbit_loss,
             "entropy": entropy_reg,
+            "obj_prior": obj_prior_loss,
         }
         nonfinite_components = [name for name, tensor in component_map.items() if not torch.isfinite(tensor)]
         if not torch.isfinite(loss):
@@ -825,6 +865,13 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
                 contrast_loss.item(),
                 orbit_loss.item(),
                 entropy_reg.item(),
+            )
+            logger.warning(
+                "nonfinite_stats step=%s orbit_pairs=%s addr_stats=%s gen_stats=%s",
+                step + 1,
+                orbit_pairs_in_batch,
+                [_tensor_stats(logits) for logits in addr_logits],
+                _tensor_stats(gen_logits),
             )
             if nonfinite_components and not _FIRST_NONFINITE_COMPONENT_LOGGED:
                 logger.warning(
@@ -844,6 +891,16 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
                 {name: float(tensor.detach().cpu().item()) for name, tensor in component_map.items()},
             )
             nan_skip_count += 1
+            nonfinite_events += 1
+            if nonfinite_lr_reduce_every > 0 and nonfinite_events % nonfinite_lr_reduce_every == 0:
+                for group in optimizer.param_groups:
+                    group["lr"] = float(group.get("lr", 0.0)) * nonfinite_lr_reduce_factor
+                logger.warning(
+                    "nonfinite_lr_reduce step=%s events=%s factor=%.3f",
+                    step + 1,
+                    nonfinite_events,
+                    nonfinite_lr_reduce_factor,
+                )
             if nan_skip_count >= max_nan_skips:
                 _save_checkpoint(
                     ckpt_dir,
@@ -855,10 +912,10 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
                 )
                 logger.error("max_nan_skips reached step=%s exit=1", step + 1)
                 sys.exit(1)
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
             continue
 
-        optimizer.zero_grad()
+        optimizer.zero_grad(set_to_none=True)
         if amp_enabled:
             scaler.scale(loss).backward()
         else:
@@ -886,11 +943,24 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
 
         with torch.no_grad():
             pred_codes = torch.stack([logits.argmax(dim=-1) for logits in addr_logits], dim=1).cpu().tolist()
+        batch_labels: List[str] = []
         for code_tuple in pred_codes:
             label = code_to_label.get(tuple(code_tuple), "unknown")
+            batch_labels.append(label)
             epoch_label_counts[label] += 1
             for idx, code in enumerate(code_tuple):
                 epoch_code_counts[idx][int(code)] += 1
+        if collapse_window > 0:
+            if len(pred_window) == pred_window.maxlen:
+                old = pred_window.popleft()
+                pred_total -= len(old)
+                pred_counter.subtract(old)
+                for key in list(pred_counter.keys()):
+                    if pred_counter[key] <= 0:
+                        del pred_counter[key]
+            pred_window.append(batch_labels)
+            pred_counter.update(batch_labels)
+            pred_total += len(batch_labels)
 
         now = time.perf_counter()
         log_due = (step + 1) % log_every == 0 or now >= next_time_log
@@ -901,7 +971,7 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
             current_lr = optimizer.param_groups[0]["lr"]
             amp_flag = "on" if amp_enabled else "off"
             logger.info(
-                "train step=%s/%s loss=%.4f addr=%.4f gen=%.4f contrast=%.4f orbit=%.4f entropy=%.4f orbit_pairs=%s lr=%.6g grad_norm=%.4f amp=%s neg_hard=%s step_s=%.3f avg_s=%.3f",
+                "train step=%s/%s loss=%.4f addr=%.4f gen=%.4f contrast=%.4f orbit=%.4f entropy=%.4f obj_prior=%.4f orbit_pairs=%s lr=%.6g grad_norm=%.4f amp=%s neg_hard=%s step_s=%.3f avg_s=%.3f",
                 step + 1,
                 steps,
                 loss.item(),
@@ -910,6 +980,7 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
                 contrast_loss.item(),
                 orbit_loss.item(),
                 entropy_reg.item(),
+                obj_prior_loss.item(),
                 orbit_pairs_in_batch,
                 current_lr,
                 grad_norm,
@@ -919,8 +990,31 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
                 avg_time,
             )
             console.print(
-                f"step {step+1}/{steps} loss={loss.item():.4f} addr={addr_loss.item():.4f} gen={gen_loss.item():.4f} contrast={contrast_loss.item():.4f} orbit={orbit_loss.item():.4f} entropy={entropy_reg.item():.4f} orbit_pairs={orbit_pairs_in_batch}"
+                f"step {step+1}/{steps} loss={loss.item():.4f} addr={addr_loss.item():.4f} gen={gen_loss.item():.4f} contrast={contrast_loss.item():.4f} orbit={orbit_loss.item():.4f} entropy={entropy_reg.item():.4f} obj_prior={obj_prior_loss.item():.4f} orbit_pairs={orbit_pairs_in_batch}"
             )
+            if collapse_window > 0 and pred_total > 0:
+                top_label, top_count = max(pred_counter.items(), key=lambda x: x[1])
+                top1_freq = top_count / pred_total
+                unique_pct = len(pred_counter) / pred_total
+                if len(pred_counter) > 1:
+                    probs = np.array(list(pred_counter.values()), dtype=np.float32) / pred_total
+                    entropy = float(-(probs * np.log(probs + 1e-9)).sum() / math.log(len(pred_counter)))
+                else:
+                    entropy = 0.0
+                collapse_active = obj_prior_weight > 0.0 and (
+                    top1_freq >= _COLLAPSE_TOP1_THRESHOLD
+                    or unique_pct <= _COLLAPSE_UNIQUE_THRESHOLD
+                    or entropy <= _COLLAPSE_ENTROPY_THRESHOLD
+                )
+                logger.info(
+                    "collapse_diag window=%s top1_freq=%.4f top_label=%s entropy=%.4f unique_pct=%.4f collapse_active=%s",
+                    collapse_window,
+                    top1_freq,
+                    top_label,
+                    entropy,
+                    unique_pct,
+                    collapse_active,
+                )
             last_log_time = now
             last_log_step = step + 1
             if now >= next_time_log:

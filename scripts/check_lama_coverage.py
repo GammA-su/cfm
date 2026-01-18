@@ -57,6 +57,18 @@ def _iter_field_values(value: object) -> List[str]:
     return [text] if text else []
 
 
+def _first_value(row: Dict[str, object], keys: Iterable[str]) -> str:
+    for key in keys:
+        values = _iter_field_values(row.get(key))
+        if values:
+            return values[0]
+    return ""
+
+
+def _extract_uri(row: Dict[str, object], keys: Iterable[str]) -> str:
+    return _first_value(row, keys)
+
+
 def _extract_subject(row: Dict[str, object]) -> str:
     for key in ("sub_label", "subject_label", "sub", "subject"):
         values = _iter_field_values(row.get(key))
@@ -96,9 +108,11 @@ def _iter_facts(path: Path) -> Iterable[Dict[str, str]]:
     df = pd.read_parquet(path)
     for _, row in df.iterrows():
         yield {
+            "subject_id": str(row.get("subject_id", "")),
             "subject_label": str(row.get("subject_label", "")),
             "relation_id": str(row.get("relation_id", "")),
             "relation_label": str(row.get("relation_label", "")),
+            "object_id_or_value": str(row.get("object_id_or_value", "")),
             "object_label": str(row.get("object_label", "")),
         }
 
@@ -166,20 +180,36 @@ def _iter_lama_records(
                 data = json.loads(raw.decode("utf-8"))
                 if cfg_name == "trex":
                     pred = relations.get(str(data.get("predicate_id", "")), {})
+                    predicate_id = _first_value(data, ("predicate_id", "relation_id", "relation"))
+                    sub_uri = _first_value(data, ("sub_uri", "subj_uri", "subject_uri"))
+                    obj_uri = _first_value(data, ("obj_uri", "object_uri"))
+                    gold_label = _first_value(data, ("obj_label", "object_label", "obj", "answer"))
                     for evidence in data.get("evidences", []):
                         yield {
-                            "masked_sentence": str(evidence.get("masked_sentence", "")),
+                            "masked_sentence": _first_value(evidence, ("masked_sentence", "masked_sentences")),
                             "template": str(pred.get("template", "")),
-                            "predicate_id": str(data.get("predicate_id", "")),
+                            "predicate_id": predicate_id,
                             "predicate_label": str(pred.get("label", "")),
                             "sub_label": str(data.get("sub_label", "")),
                             "obj_label": str(data.get("obj_label", "")),
+                            "sub_uri": sub_uri,
+                            "obj_uri": obj_uri,
+                            "gold_label": gold_label,
                         }
                         yielded += 1
                         if max_samples and yielded >= max_samples:
                             return
                 else:
-                    yield data
+                    record = dict(data)
+                    record["masked_sentence"] = _first_value(data, ("masked_sentence", "masked_sentences"))
+                    predicate_id = _first_value(data, ("predicate_id", "relation_id", "relation"))
+                    record["predicate_id"] = predicate_id
+                    if cfg_name == "google_re" and not predicate_id:
+                        record["literal_only"] = True
+                    record["sub_uri"] = _first_value(data, ("sub_uri", "subj_uri", "subject_uri"))
+                    record["obj_uri"] = _first_value(data, ("obj_uri", "object_uri"))
+                    record["gold_label"] = _first_value(data, ("obj_label", "object_label", "obj", "answer"))
+                    yield record
                     yielded += 1
                     if max_samples and yielded >= max_samples:
                         return
@@ -234,7 +264,15 @@ def main(
     any_set = set()
     strict_id_set = set()
     strict_label_set = set()
+    id_set = set()
     for fact in _iter_facts(facts_path):
+        subj_id = str(fact.get("subject_id", "")).strip()
+        rel_id_raw = str(fact.get("relation_id", "")).strip()
+        obj_id = str(fact.get("object_id_or_value", "")).strip()
+        if subj_id and rel_id_raw and obj_id:
+            id_set.add((subj_id, rel_id_raw, obj_id))
+        if subset == "trex":
+            continue
         subj = _normalize(fact["subject_label"])
         obj = _normalize(fact["object_label"])
         if not subj or not obj:
@@ -247,11 +285,12 @@ def main(
         if rel_label:
             strict_label_set.add((subj, rel_label, obj))
     logger.info(
-        "load_factbank done facts=%s any_keys=%s strict_id=%s strict_label=%s time=%.2fs",
+        "load_factbank done facts=%s any_keys=%s strict_id=%s strict_label=%s id_keys=%s time=%.2fs",
         len(any_set),
         len(any_set),
         len(strict_id_set),
         len(strict_label_set),
+        len(id_set),
         time.perf_counter() - t0,
     )
 
@@ -277,10 +316,32 @@ def main(
     any_hits = 0
     strict_hits = 0
     strict_eligible = 0
+    literal_hits = 0
+    literal_total = 0
     matched = []
     unmatched = []
 
     for row in ds:
+        sub_uri = _extract_uri(row, ("sub_uri", "subj_uri", "subject_uri"))
+        obj_uri = _extract_uri(row, ("obj_uri", "object_uri"))
+        rel_id_raw, rel_label_raw = _extract_relation(row)
+
+        if subset == "trex":
+            rel_id = rel_id_raw
+            if not sub_uri or not obj_uri or not rel_id:
+                continue
+            total += 1
+            id_match = (sub_uri, rel_id, obj_uri) in id_set
+            if id_match:
+                any_hits += 1
+                strict_hits += 1
+            strict_eligible += 1
+            if len(matched) < 5 and id_match:
+                matched.append({"subject": sub_uri, "relation": rel_id, "object": obj_uri})
+            if len(unmatched) < 5 and not id_match:
+                unmatched.append({"subject": sub_uri, "relation": rel_id, "object": obj_uri})
+            continue
+
         subj_raw = _extract_subject(row)
         obj_raw = _extract_object(row)
         if not subj_raw or not obj_raw:
@@ -295,7 +356,26 @@ def main(
         if any_match:
             any_hits += 1
 
-        rel_id_raw, rel_label_raw = _extract_relation(row)
+        if subset == "google_re":
+            literal_total += 1
+            if any_match:
+                literal_hits += 1
+            if len(matched) < 5 and any_match:
+                entry = {"subject": subj_raw, "relation": rel_id_raw or rel_label_raw, "object": obj_raw}
+                if sub_uri:
+                    entry["sub_uri"] = sub_uri
+                if obj_uri:
+                    entry["obj_uri"] = obj_uri
+                matched.append(entry)
+            if len(unmatched) < 5 and not any_match:
+                entry = {"subject": subj_raw, "relation": rel_id_raw or rel_label_raw, "object": obj_raw}
+                if sub_uri:
+                    entry["sub_uri"] = sub_uri
+                if obj_uri:
+                    entry["obj_uri"] = obj_uri
+                unmatched.append(entry)
+            continue
+
         rel_id = _normalize(rel_id_raw)
         rel_label = _normalize(rel_label_raw)
         strict_match = False
@@ -309,15 +389,28 @@ def main(
                 strict_hits += 1
 
         if len(matched) < 5 and (any_match or strict_match):
-            matched.append({"subject": subj_raw, "relation": rel_id_raw or rel_label_raw, "object": obj_raw})
+            entry = {"subject": subj_raw, "relation": rel_id_raw or rel_label_raw, "object": obj_raw}
+            if sub_uri:
+                entry["sub_uri"] = sub_uri
+            if obj_uri:
+                entry["obj_uri"] = obj_uri
+            matched.append(entry)
         if len(unmatched) < 5 and not any_match:
-            unmatched.append({"subject": subj_raw, "relation": rel_id_raw or rel_label_raw, "object": obj_raw})
+            entry = {"subject": subj_raw, "relation": rel_id_raw or rel_label_raw, "object": obj_raw}
+            if sub_uri:
+                entry["sub_uri"] = sub_uri
+            if obj_uri:
+                entry["obj_uri"] = obj_uri
+            unmatched.append(entry)
 
-    coverage_any = any_hits / max(total, 1)
-    coverage_strict = strict_hits / max(strict_eligible, 1)
-
-    print(f"coverage_any: {coverage_any:.4f} ({any_hits}/{total})")
-    print(f"coverage_strict: {coverage_strict:.4f} ({strict_hits}/{strict_eligible})")
+    if subset == "google_re":
+        coverage_literal = literal_hits / max(literal_total, 1)
+        print(f"coverage_literal: {coverage_literal:.4f} ({literal_hits}/{literal_total})")
+    else:
+        coverage_any = any_hits / max(total, 1)
+        coverage_strict = strict_hits / max(strict_eligible, 1)
+        print(f"coverage_any: {coverage_any:.4f} ({any_hits}/{total})")
+        print(f"coverage_strict: {coverage_strict:.4f} ({strict_hits}/{strict_eligible})")
     print("matched_examples:")
     for ex in matched:
         print(f"  - {ex}")
