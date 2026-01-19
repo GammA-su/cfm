@@ -7,6 +7,12 @@ src/forge_omega_500.egg-info/SOURCES.txt
 src/forge_omega_500.egg-info/dependency_links.txt
 src/forge_omega_500.egg-info/requires.txt
 src/forge_omega_500.egg-info/top_level.txt
+src/forge_omega_500/data/__init__.py
+src/forge_omega_500/data/build_factbank.py
+src/forge_omega_500/data/embeddings.py
+src/forge_omega_500/data/hf_ingest.py
+src/forge_omega_500/data/rvq.py
+src/forge_omega_500/data/templates.py
 src/forge_omega_500/eval/__init__.py
 src/forge_omega_500/eval/metrics.py
 src/forge_omega_500/model/__init__.py
