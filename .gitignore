@@ -3,6 +3,8 @@ __pycache__/
 *.pyc
 .cache/
 data/
+!src/forge_omega_500/data/
+!src/forge_omega_500/data/**
 out/
 .conda
 .conda_installer
