@@ -283,13 +283,112 @@ def _load_factbank(factbank_dir: Path) -> List[Dict[str, object]]:
     return df.to_dict(orient="records")
 
 
+def _clean_text(value: object) -> str:
+    return str(value).strip()
+
+
+def _generate_fallback_orbits(
+    subject_label: str,
+    relation_label: str,
+    object_label: str,
+    count: int,
+    seed: int,
+) -> List[str]:
+    rng = random.Random(seed)
+    subject = subject_label or "Unknown"
+    relation = relation_label or "relation"
+    base_templates = [
+        "Fill in the blank: {subject} {relation} ____.",
+        "{subject} {relation} ____.",
+        "What is the {relation} of {subject}?",
+        "The {relation} of {subject} is ____.",
+        "{subject} has {relation} ____.",
+    ]
+    rng.shuffle(base_templates)
+    orbits: List[str] = []
+    if count <= 0:
+        return orbits
+    idx = 0
+    while len(orbits) < count:
+        tmpl = base_templates[idx % len(base_templates)]
+        orbits.append(tmpl.format(subject=subject, relation=relation, object=object_label))
+        idx += 1
+    return orbits
+
+
+def _normalize_factbank(
+    records: List[Dict[str, object]],
+    orbits_per_fact: int,
+    seed: int,
+) -> Tuple[int, int]:
+    filled_labels = 0
+    generated_orbits = 0
+    for idx, rec in enumerate(records):
+        subject_id = _clean_text(rec.get("subject_id", ""))
+        relation_id = _clean_text(rec.get("relation_id", ""))
+        object_id = _clean_text(rec.get("object_id_or_value", ""))
+
+        subject_label = _clean_text(rec.get("subject_label", ""))
+        relation_label = _clean_text(rec.get("relation_label", ""))
+        object_label = _clean_text(rec.get("object_label", ""))
+
+        if not subject_label and subject_id:
+            rec["subject_label"] = subject_id
+            subject_label = subject_id
+            filled_labels += 1
+        if not relation_label and relation_id:
+            rec["relation_label"] = relation_id
+            relation_label = relation_id
+            filled_labels += 1
+        if not object_label and object_id:
+            rec["object_label"] = object_id
+            object_label = object_id
+            filled_labels += 1
+
+        orbits = rec.get("question_orbits")
+        cleaned_orbits: List[str] = []
+        if isinstance(orbits, list):
+            cleaned_orbits = [o for o in (_clean_text(v) for v in orbits) if o]
+        if not cleaned_orbits and orbits_per_fact > 0:
+            try:
+                fact_id = int(rec.get("fact_id", idx))
+            except (TypeError, ValueError):
+                fact_id = idx
+            cleaned_orbits = _generate_fallback_orbits(
+                subject_label,
+                relation_label,
+                object_label,
+                orbits_per_fact,
+                seed=seed + fact_id,
+            )
+            generated_orbits += 1
+        if cleaned_orbits:
+            rec["question_orbits"] = cleaned_orbits
+        else:
+            rec["question_orbits"] = []
+    return filled_labels, generated_orbits
+
+
+def _resolve_answer(
+    rec: Dict[str, object],
+    answer_codes: Dict[str, List[int]],
+) -> Tuple[Optional[str], Optional[List[int]]]:
+    for key in ("object_label", "object_id_or_value"):
+        value = _clean_text(rec.get(key, ""))
+        if not value:
+            continue
+        codes = answer_codes.get(value)
+        if codes is not None:
+            return value, codes
+    return None, None
+
+
 def _build_examples(records: List[Dict[str, object]], answer_codes: Dict[str, List[int]]) -> List[Dict[str, object]]:
     examples = []
     for rec in records:
-        answer = str(rec["object_label"])
-        if answer not in answer_codes:
+        answer, codes = _resolve_answer(rec, answer_codes)
+        if answer is None or codes is None:
             continue
-        codes = answer_codes[answer]
         for orbit in rec["question_orbits"]:
             examples.append({
                 "fact_id": rec["fact_id"],
@@ -308,9 +407,8 @@ def _is_cloze(prompt: str) -> bool:
 def _build_fact_index(records: List[Dict[str, object]], answer_codes: Dict[str, List[int]]) -> List[Dict[str, object]]:
     facts = []
     for rec in records:
-        answer = str(rec["object_label"])
-        codes = answer_codes.get(answer)
-        if codes is None:
+        answer, codes = _resolve_answer(rec, answer_codes)
+        if answer is None or codes is None:
             continue
         orbits = [str(o) for o in rec.get("question_orbits", []) if o]
         if not orbits:
@@ -631,6 +729,13 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
     answer_codes = load_answer_codes(codes_dir / "answer_codes.parquet")
     logger.info("load_answer_codes done answers=%s time=%.2fs", len(answer_codes), time.perf_counter() - t0)
 
+    fallback_orbits = int(data_cfg.get("orbits_per_fact") or 0)
+    filled_labels, generated_orbits = _normalize_factbank(records, fallback_orbits, seed)
+    if filled_labels:
+        logger.info("factbank_labels_filled count=%s", filled_labels)
+    if generated_orbits:
+        logger.info("factbank_orbits_generated count=%s per_fact=%s", generated_orbits, fallback_orbits)
+
     logger.info("build_examples start")
     t0 = time.perf_counter()
     examples = _build_examples(records, answer_codes)
@@ -706,7 +811,12 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
     facts = _build_fact_index(records, answer_codes)
     relation_ids, relation_to_indices = _build_relation_index(facts)
     if not facts:
-        raise ValueError("No training facts with orbits and answer codes found.")
+        orbits_ready = sum(1 for rec in records if rec.get("question_orbits"))
+        answers_ready = sum(1 for rec in records if _resolve_answer(rec, answer_codes)[0] is not None)
+        raise ValueError(
+            "No training facts with orbits and answer codes found. "
+            f"records={len(records)} with_orbits={orbits_ready} with_answer_codes={answers_ready}"
+        )
     if not relation_ids:
         raise ValueError("No relation ids found for relation-balanced sampling.")
     code_to_label = _build_code_to_label(answer_codes)
