@@ -38,6 +38,17 @@ def _normalize(text: str) -> str:
     return text.lower().strip().translate(_PUNCT_TABLE)
 
 
+def _normalize_id(value: str) -> str:
+    text = str(value).strip().strip("<>")
+    if not text:
+        return ""
+    if "/" in text:
+        text = text.rsplit("/", 1)[-1]
+    if text.startswith("wd:"):
+        text = text[3:]
+    return text
+
+
 def _iter_field_values(value: object) -> List[str]:
     if value is None:
         return []
@@ -104,8 +115,7 @@ def _extract_relation(row: Dict[str, object]) -> Tuple[str, str]:
     return rel_id, rel_label
 
 
-def _iter_facts(path: Path) -> Iterable[Dict[str, str]]:
-    df = pd.read_parquet(path)
+def _iter_facts(df: pd.DataFrame) -> Iterable[Dict[str, str]]:
     for _, row in df.iterrows():
         yield {
             "subject_id": str(row.get("subject_id", "")),
@@ -266,18 +276,18 @@ def main(
 
     logger.info("load_factbank start path=%s", facts_path)
     t0 = time.perf_counter()
+    df = pd.read_parquet(facts_path)
+    rows = len(df)
     any_set = set()
-    strict_id_set = set()
     strict_label_set = set()
-    id_set = set()
-    for fact in _iter_facts(facts_path):
-        subj_id = str(fact.get("subject_id", "")).strip()
-        rel_id_raw = str(fact.get("relation_id", "")).strip()
-        obj_id = str(fact.get("object_id_or_value", "")).strip()
+    strict_rel_id_set = set()
+    id_keys = set()
+    for fact in _iter_facts(df):
+        subj_id = _normalize_id(fact.get("subject_id", ""))
+        rel_id_raw = _normalize_id(fact.get("relation_id", ""))
+        obj_id = _normalize_id(fact.get("object_id_or_value", ""))
         if subj_id and rel_id_raw and obj_id:
-            id_set.add((subj_id, rel_id_raw, obj_id))
-        if subset == "trex":
-            continue
+            id_keys.add((subj_id, rel_id_raw, obj_id))
         subj = _normalize(fact["subject_label"])
         obj = _normalize(fact["object_label"])
         if not subj or not obj:
@@ -286,16 +296,17 @@ def main(
         rel_id = _normalize(fact["relation_id"])
         rel_label = _normalize(fact["relation_label"])
         if rel_id:
-            strict_id_set.add((subj, rel_id, obj))
+            strict_rel_id_set.add((subj, rel_id, obj))
         if rel_label:
             strict_label_set.add((subj, rel_label, obj))
+    strict_id_set = id_keys
     logger.info(
-        "load_factbank done facts=%s any_keys=%s strict_id=%s strict_label=%s id_keys=%s time=%.2fs",
+        "load_factbank done rows=%s id_keys=%s any_keys=%s strict_label=%s strict_id=%s time=%.2fs",
+        rows,
+        len(id_keys),
         len(any_set),
-        len(any_set),
-        len(strict_id_set),
         len(strict_label_set),
-        len(id_set),
+        len(strict_id_set),
         time.perf_counter() - t0,
     )
 
@@ -332,11 +343,13 @@ def main(
         rel_id_raw, rel_label_raw = _extract_relation(row)
 
         if subset == "trex":
-            rel_id = rel_id_raw
-            if not sub_uri or not obj_uri or not rel_id:
+            sub_id = _normalize_id(sub_uri)
+            obj_id = _normalize_id(obj_uri)
+            rel_id = _normalize_id(rel_id_raw)
+            if not sub_id or not obj_id or not rel_id:
                 continue
             total += 1
-            id_match = (sub_uri, rel_id, obj_uri) in id_set
+            id_match = (sub_id, rel_id, obj_id) in strict_id_set
             if id_match:
                 any_hits += 1
                 strict_hits += 1
@@ -386,7 +399,7 @@ def main(
         strict_match = False
         if rel_id or rel_label:
             strict_eligible += 1
-            if rel_id and (subj, rel_id, obj) in strict_id_set:
+            if rel_id and (subj, rel_id, obj) in strict_rel_id_set:
                 strict_match = True
             elif rel_label and (subj, rel_label, obj) in strict_label_set:
                 strict_match = True

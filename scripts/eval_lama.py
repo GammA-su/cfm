@@ -81,6 +81,8 @@ _FILE_LOG_READY = False
 
 _set_startup_stage("ready")
 
+_DEFAULT_LAMA_SUBSETS = ("google_re", "trex", "conceptnet", "squad")
+
 
 def _ensure_file_logger(out_dir: Path) -> None:
     global _FILE_LOG_READY
@@ -405,7 +407,21 @@ def _fallback_token_from_logits(
 
 
 @app.command()
-def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
+def main(
+    config: Path = typer.Option(..., help="Path to config YAML"),
+    subset: str = typer.Option(
+        "all",
+        help="LAMA subset: trex, google_re, conceptnet, squad, or all",
+    ),
+    limit: int | None = typer.Option(
+        None,
+        help="Max samples to evaluate (default: eval.max_samples from config)",
+    ),
+    out: Path | None = typer.Option(
+        None,
+        help="Output report path (default: out/lama_report.json)",
+    ),
+) -> None:
     cfg = yaml.safe_load(config.read_text())
     seed = int(cfg["seed"])
     set_seed(seed)
@@ -431,6 +447,8 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
 
     out_dir = Path("out")
     _ensure_file_logger(out_dir)
+    out_path = out if out is not None else out_dir / "lama_report.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
 
     logger.info("load_tokenizer start")
     t0 = time.perf_counter()
@@ -483,16 +501,34 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
     factbank_dir = Path(data_cfg["factbank_dir"])
     qid_to_label = _load_qid_to_label(factbank_dir / "qid_to_label.parquet")
 
+    subset = subset.strip().lower()
+    valid_subsets = set(_DEFAULT_LAMA_SUBSETS)
+    if subset not in valid_subsets and subset != "all":
+        raise typer.BadParameter("subset must be one of trex, google_re, conceptnet, squad, all")
+
+    configured_subsets = eval_cfg.get("subsets", list(_DEFAULT_LAMA_SUBSETS))
+    if isinstance(configured_subsets, str):
+        configured_subsets = [configured_subsets]
+    base_subsets = [str(name).strip().lower() for name in configured_subsets if str(name).strip()]
+    invalid = sorted({name for name in base_subsets if name not in valid_subsets})
+    if invalid:
+        raise ValueError(f"Invalid eval.subsets entries: {invalid}")
+    if subset != "all":
+        base_subsets = [name for name in base_subsets if name == subset]
+        if not base_subsets:
+            raise typer.BadParameter(f"subset {subset} not enabled in eval.subsets")
+
+    limit_samples = int(eval_cfg["max_samples"]) if limit is None else int(limit)
     local_files_only = bool(data_cfg.get("local_files_only", False))
     cache_dir = Path(data_cfg.get("hf_cache_dir", ".cache/huggingface"))
     use_fallback = False
     logger.info("discover_lama_configs start")
     try:
         available = get_dataset_config_names("facebook/lama")
-        target_configs = [c for c in ["google_re", "trex", "conceptnet", "squad"] if c in available]
+        target_configs = [c for c in base_subsets if c in available]
     except Exception as exc:
         logger.warning("get_dataset_config_names failed: %s; falling back to tar loader", exc)
-        target_configs = ["google_re", "trex", "conceptnet", "squad"]
+        target_configs = list(base_subsets)
         use_fallback = True
     logger.info("discover_lama_configs done use_fallback=%s", use_fallback)
     report = {}
@@ -505,7 +541,7 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
     abstain_on_empty = bool(inf_cfg.get("abstain_on_empty", False))
 
     for cfg_name in target_configs:
-        max_samples = int(eval_cfg["max_samples"])
+        max_samples = limit_samples
         logger.info("load_dataset start cfg=%s", cfg_name)
         t0 = time.perf_counter()
         if use_fallback:
@@ -659,7 +695,6 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
             acc_text,
         )
 
-    out_path = out_dir / "lama_report.json"
     out_path.write_text(json.dumps(report, indent=2))
     logger.info("report_saved path=%s", out_path)
     console.print(f"Saved LAMA report to {out_path}")
