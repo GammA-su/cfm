@@ -7,6 +7,7 @@ from fnmatch import fnmatch
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 
+import numpy as np
 import pandas as pd
 import typer
 import yaml
@@ -56,6 +57,10 @@ def _iter_field_values(value: object) -> List[str]:
         for item in value:
             items.extend(_iter_field_values(item))
         return items
+    if isinstance(value, np.ndarray):
+        if value.ndim == 0:
+            return _iter_field_values(value.item())
+        return _iter_field_values(value.tolist())
     text = str(value).strip()
     return [text] if text else []
 
@@ -131,8 +136,13 @@ def _iter_lama_records(
                     record["masked_sentence"] = _first_value(data, ("masked_sentence", "masked_sentences"))
                     predicate_id = _first_value(data, ("predicate_id", "relation_id", "relation"))
                     record["predicate_id"] = predicate_id
-                    if cfg_name == "google_re" and not predicate_id:
-                        record["literal_only"] = True
+                    if cfg_name == "google_re":
+                        relation_value = _first_value(data, ("relation",))
+                        if not relation_value and predicate_id:
+                            record["relation"] = predicate_id
+                        if not predicate_id:
+                            record["relation"] = ""
+                            record["literal_only"] = True
                     record["sub_uri"] = _first_value(data, ("sub_uri", "subj_uri", "subject_uri"))
                     record["obj_uri"] = _first_value(data, ("obj_uri", "object_uri"))
                     record["gold_label"] = _first_value(data, ("obj_label", "object_label", "obj", "answer"))
@@ -230,7 +240,12 @@ def main(
         if limit:
             dataset = dataset.select(range(min(limit, len(dataset))))
         ds = dataset
-    logger.info("load_dataset done cfg=%s time=%.2fs", subset, time.perf_counter() - load_t0)
+    logger.info(
+        "load_dataset done cfg=%s samples=%s time=%.2fs",
+        subset,
+        len(ds),
+        time.perf_counter() - load_t0,
+    )
 
     supported = 0
     covered = 0

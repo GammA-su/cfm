@@ -12,6 +12,16 @@ uv run python scripts/eval_lama.py --config configs/default.yaml
 uv run pytest -q
 ```
 
+## Setup (Wikidata5M extract)
+
+If you download `wikidata5m_transductive.tar.gz` manually, extract it with:
+
+```bash
+tar --no-same-owner --no-same-permissions -xzf wikidata5m_transductive.tar.gz -C data/wikidata5m/transductive
+```
+
+The archive records UID/GID values that can be missing on some systems. The resulting warning is harmless, but it causes a non-zero exit unless you use the flags above.
+
 ## Notes
 
 - Hugging Face datasets are the *input seeds*. The FactBank and code labels are generated locally in `data/`.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import heapq
 import json
 import os
 import random
@@ -8,6 +9,8 @@ import shutil
 import tarfile
 import urllib.request
 from pathlib import Path
+from collections import Counter
+from typing import Iterable
 
 import pandas as pd
 
@@ -60,6 +63,9 @@ WIKIDATA5M_EXPECTED = (
     "wikidata5m_transductive_valid.txt",
     "wikidata5m_transductive_test.txt",
 )
+WIKIDATA5M_TRAIN_FILE = "wikidata5m_transductive_train.txt"
+WIKIDATA5M_SAMPLE_SEED = 0
+WIKIDATA5M_TOP_PRED_LIMIT = 12
 
 
 def _save_qid_to_label(records: list[dict[str, object]], factbank_dir: Path) -> None:
@@ -261,17 +267,15 @@ def _load_wikidata5m_triples(
                     heap = pid_heaps[relation_id]
                     triple_hash = _stable_hash(seed, subject_id, relation_id, object_id)
                     triple = _triple_from_ids(subject_id, relation_id, object_id)
+                    entry = (-triple_hash, triple)
                     if len(heap) < max_per_pid:
-                        heap.append((triple_hash, triple))
-                        if len(heap) == max_per_pid:
-                            heap.sort(key=lambda x: x[0], reverse=True)
+                        heapq.heappush(heap, entry)
                         continue
-                    if heap and triple_hash < heap[0][0]:
-                        heap[0] = (triple_hash, triple)
-                        heap.sort(key=lambda x: x[0], reverse=True)
+                    if heap and entry[0] > heap[0][0]:
+                        heapq.heapreplace(heap, entry)
 
         for pid, heap in pid_heaps.items():
-            kept = [item[1] for item in heap]
+            kept = [item[1] for item in sorted(heap, key=lambda x: x[0], reverse=True)]
             for triple in kept:
                 key = (
                     triple["subject_id"],
@@ -374,6 +378,9 @@ def _load_lama_relation_ids(cache_dir: Path, local_files_only: bool) -> set[str]
         for line in f:
             data = json.loads(line)
             rel = str(data.get("relation", "")).strip()
+            dataset = str(data.get("dataset", "") or data.get("source", "")).strip().lower()
+            if dataset and dataset not in {"trex", "t-rex"}:
+                continue
             if rel.startswith("P") and rel[1:].isdigit():
                 relation_ids.add(rel)
     return relation_ids
@@ -383,6 +390,146 @@ def _stable_hash(seed: int, subject_id: str, relation_id: str, object_id: str) -
     payload = f"{seed}|{subject_id}|{relation_id}|{object_id}".encode("utf-8")
     digest = hashlib.blake2b(payload, digest_size=8).digest()
     return int.from_bytes(digest, "big", signed=False)
+
+
+def _stable_line_hash(seed: int, line: str) -> int:
+    payload = f"{seed}|{line}".encode("utf-8")
+    digest = hashlib.blake2b(payload, digest_size=8).digest()
+    return int.from_bytes(digest, "big", signed=False)
+
+
+def _iter_wikidata5m_triples(path: Path) -> Iterable[tuple[str, str, str, str]]:
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            raw = line.rstrip("\n")
+            if not raw:
+                continue
+            parts = raw.split("\t")
+            if len(parts) != 3:
+                continue
+            subject_id, relation_id, object_id = (p.strip() for p in parts)
+            if not subject_id or not relation_id or not object_id:
+                continue
+            yield subject_id, relation_id, object_id, raw
+
+
+def _load_wikidata5m_raw_factbank(
+    wikidata5m_dir: Path,
+    max_facts: int,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    train_path = wikidata5m_dir / WIKIDATA5M_TRAIN_FILE
+    if not train_path.exists():
+        raise FileNotFoundError(
+            f"missing wikidata5m train split at {train_path}; "
+            "set --wikidata5m_dir to the directory containing wikidata5m_transductive_train.txt"
+        )
+
+    total = 0
+    subject_q = 0
+    relation_p = 0
+    object_q = 0
+    qpq = 0
+    predicate_counts: Counter = Counter()
+    sample_heap: list[tuple[int, str]] = []
+    all_lines: list[str] = []
+
+    for subject_id, relation_id, object_id, raw in _iter_wikidata5m_triples(train_path):
+        total += 1
+        is_subject_q = subject_id.startswith("Q")
+        is_relation_p = relation_id.startswith("P")
+        is_object_q = object_id.startswith("Q")
+        if is_subject_q:
+            subject_q += 1
+        if is_relation_p:
+            relation_p += 1
+        if is_object_q:
+            object_q += 1
+        if is_subject_q and is_relation_p and is_object_q:
+            qpq += 1
+        predicate_counts[relation_id] += 1
+        if max_facts > 0:
+            line_hash = _stable_line_hash(WIKIDATA5M_SAMPLE_SEED, raw)
+            entry = (-line_hash, raw)
+            if len(sample_heap) < max_facts:
+                heapq.heappush(sample_heap, entry)
+            elif entry[0] > sample_heap[0][0]:
+                heapq.heapreplace(sample_heap, entry)
+        else:
+            all_lines.append(raw)
+
+    if total == 0:
+        raise ValueError(f"no valid triples found in {train_path}")
+
+    subject_ratio = subject_q / total
+    relation_ratio = relation_p / total
+    if subject_ratio < 0.95 or relation_ratio < 0.95:
+        raise ValueError(
+            "wikidata5m_id_ratio_too_low "
+            f"subject_q_ratio={subject_ratio:.3f} relation_p_ratio={relation_ratio:.3f} total={total}"
+        )
+
+    logger.info(
+        "wikidata5m_id_stats total=%s subject_q=%s relation_p=%s object_q=%s qpq=%s",
+        total,
+        subject_q,
+        relation_p,
+        object_q,
+        qpq,
+    )
+    top_predicates = predicate_counts.most_common(WIKIDATA5M_TOP_PRED_LIMIT)
+    logger.info("wikidata5m_top_predicates top=%s", top_predicates)
+    logger.info("wikidata5m_predicate_p131 count=%s", predicate_counts.get("P131", 0))
+
+    if max_facts > 0:
+        selected_lines = [item[1] for item in sorted(sample_heap, key=lambda x: x[0], reverse=True)]
+    else:
+        selected_lines = all_lines
+
+    records: list[dict[str, object]] = []
+    model_records: list[dict[str, object]] = []
+    for idx, raw in enumerate(selected_lines):
+        subject_id, relation_id, object_id = (p.strip() for p in raw.split("\t"))
+        record = {
+            "fact_id": idx,
+            "subject_id": subject_id,
+            "subject_label": "",
+            "relation_id": relation_id,
+            "relation_label": "",
+            "object_id_or_value": object_id,
+            "object_label": "",
+            "question_orbits": [],
+            "hard_negatives": [],
+        }
+        records.append(record)
+        model_record = dict(record)
+        model_record["object_label"] = object_id
+        model_records.append(model_record)
+
+    logger.info(
+        "wikidata5m_sampled max_facts=%s sampled=%s",
+        max_facts,
+        len(records),
+    )
+    return records, model_records
+
+
+def _save_factbank_raw(records: list[dict[str, object]], factbank_dir: Path) -> None:
+    factbank_dir.mkdir(parents=True, exist_ok=True)
+    columns = [
+        "fact_id",
+        "subject_id",
+        "subject_label",
+        "relation_id",
+        "relation_label",
+        "object_id_or_value",
+        "object_label",
+        "question_orbits",
+        "hard_negatives",
+    ]
+    df = pd.DataFrame(records, columns=columns)
+    path = factbank_dir / "facts.parquet"
+    df.to_parquet(path, index=False)
+    logger.info("factbank_saved path=%s rows=%s", path, len(df))
 
 
 def _extract_lama_literals(archive_path: Path, max_samples: int | None = None) -> list[dict[str, str]]:
@@ -449,6 +596,10 @@ def main(
     config: Path = typer.Option(..., help="Path to config YAML"),
     source: str = typer.Option("hf", help="Data source: hf or wikidata5m"),
     max_facts: int | None = typer.Option(None, help="Override max_facts from config"),
+    wikidata5m_dir: Path = typer.Option(
+        "data/wikidata5m",
+        help="Directory containing wikidata5m_transductive_train.txt",
+    ),
     include_valid: bool = typer.Option(False, help="Include wikidata5m valid split"),
     include_test: bool = typer.Option(False, help="Include wikidata5m test split"),
     boost_lama_relations: bool = typer.Option(True, help="Boost LAMA relation coverage"),
@@ -486,57 +637,23 @@ def main(
     codes_dir = Path(data_cfg["codes_dir"])
 
     effective_max_facts = int(max_facts) if max_facts is not None else int(data_cfg["max_facts"])
-    triples = []
+    records: list[dict[str, object]] = []
+    model_records: list[dict[str, object]] | None = None
     if source == "wikidata5m":
-        transductive_dir = Path("data") / "wikidata5m" / "transductive"
-        logger.info(
-            "load_wikidata5m start dir=%s include_valid=%s include_test=%s max_facts=%s",
-            transductive_dir,
-            include_valid,
-            include_test,
-            effective_max_facts,
+        if include_valid or include_test:
+            logger.info(
+                "wikidata5m_raw ignores include_valid/include_test include_valid=%s include_test=%s",
+                include_valid,
+                include_test,
+            )
+        if boost_lama_relations:
+            logger.info("wikidata5m_raw ignores lama_boost")
+        logger.info("load_wikidata5m_raw start dir=%s max_facts=%s", wikidata5m_dir, effective_max_facts)
+        records, model_records = _load_wikidata5m_raw_factbank(
+            wikidata5m_dir=wikidata5m_dir,
+            max_facts=effective_max_facts,
         )
-        try:
-            triples = _load_wikidata5m_triples(
-                transductive_dir=transductive_dir,
-                include_valid=include_valid,
-                include_test=include_test,
-                max_facts=effective_max_facts,
-                seed=seed,
-                allow_download=not bool(data_cfg.get("local_files_only", False)),
-                boost_lama_relations=boost_lama_relations,
-                min_per_pid=min_per_pid,
-                max_per_pid=max_per_pid,
-                cache_dir=Path(data_cfg.get("hf_cache_dir", ".cache/huggingface")),
-                local_files_only=bool(data_cfg.get("local_files_only", False)),
-            )
-        except Exception as exc:
-            logger.warning(
-                "wikidata5m_transductive_unavailable error=%s fallback=hf",
-                exc,
-            )
-            use_direct_tar = bool(data_cfg.get("use_direct_tar", True))
-            raw_path = raw_dir / "wikidata5m.parquet"
-            if use_direct_tar:
-                ingest_wikidata5m_tar(
-                    raw_path,
-                    max_triples=effective_max_facts,
-                    sources=list(data_cfg.get("wikidata5m_sources", ["transductive"])),
-                    cache_dir=Path(data_cfg.get("hf_cache_dir", ".cache/huggingface")),
-                    local_files_only=bool(data_cfg.get("local_files_only", False)),
-                )
-            else:
-                ingest_wikidata5m(
-                    raw_path,
-                    max_triples=effective_max_facts,
-                    seed=seed,
-                    use_streaming=bool(data_cfg.get("use_streaming", True)),
-                    shuffle=bool(data_cfg.get("shuffle", False)),
-                    shuffle_buffer=int(data_cfg.get("shuffle_buffer", 1000)),
-                    local_files_only=bool(data_cfg.get("local_files_only", False)),
-                    cache_dir=Path(data_cfg.get("hf_cache_dir", ".cache/huggingface")),
-                )
-            triples = load_triples(raw_path)
+        _save_factbank_raw(records, factbank_dir)
     else:
         use_direct_tar = bool(data_cfg.get("use_direct_tar", True))
         logger.info(
@@ -569,33 +686,37 @@ def main(
             )
         triples = load_triples(raw_path)
 
-    logger.info("load_relation_templates start")
-    relation_templates = load_relation_templates(
-        cache_dir=Path(data_cfg.get("hf_cache_dir", ".cache/huggingface")),
-        local_files_only=bool(data_cfg.get("local_files_only", False)),
-    )
-    logger.info("load_relation_templates done relations=%s", len(relation_templates))
+        logger.info("load_relation_templates start")
+        relation_templates = load_relation_templates(
+            cache_dir=Path(data_cfg.get("hf_cache_dir", ".cache/huggingface")),
+            local_files_only=bool(data_cfg.get("local_files_only", False)),
+        )
+        logger.info("load_relation_templates done relations=%s", len(relation_templates))
 
-    logger.info("build_factbank start")
-    logger.info("triples_loaded=%s", len(triples))
-    records = build_factbank_records(
-        triples,
-        max_facts=0 if source == "wikidata5m" else effective_max_facts,
-        orbits_per_fact=int(data_cfg["orbits_per_fact"]),
-        negatives_per_fact=int(data_cfg["negatives_per_fact"]),
-        seed=seed,
-        templates_by_relation=relation_templates,
-        min_cloze=10,
-    )
-    save_factbank(records, factbank_dir)
+        logger.info("build_factbank start")
+        logger.info("triples_loaded=%s", len(triples))
+        records = build_factbank_records(
+            triples,
+            max_facts=effective_max_facts,
+            orbits_per_fact=int(data_cfg["orbits_per_fact"]),
+            negatives_per_fact=int(data_cfg["negatives_per_fact"]),
+            seed=seed,
+            templates_by_relation=relation_templates,
+            min_cloze=10,
+        )
+        save_factbank(records, factbank_dir)
+
     _save_qid_to_label(records, factbank_dir)
     logger.info("facts_built=%s", len(records))
     literal_count = sum(1 for rec in records if str(rec.get("object_literal", "")).strip())
     logger.info("literal_facts=%s", literal_count)
 
+    if model_records is None:
+        model_records = records
+
     logger.info("build_answer_embeddings start")
     model_cfg = cfg["model"]
-    answers, embeddings = build_answer_embeddings(records, dim=int(model_cfg["d_code"]), emb_dir=emb_dir)
+    answers, embeddings = build_answer_embeddings(model_records, dim=int(model_cfg["d_code"]), emb_dir=emb_dir)
     logger.info("answers=%s emb_dim=%s", len(answers), int(model_cfg["d_code"]))
 
     require_faiss_gpu = bool(rvq_cfg.get("require_faiss_gpu", False))
@@ -633,7 +754,7 @@ def main(
 
     save_codebooks(codebooks, codes_dir / "codebooks.safetensors")
     save_answer_codes(answers, codes, codes_dir / "answer_codes.parquet")
-    save_code_to_label(records, answers, codes, codes_dir / "code_to_label.parquet")
+    save_code_to_label(model_records, answers, codes, codes_dir / "code_to_label.parquet")
 
     build_lama_literals = bool(data_cfg.get("build_lama_literals", False))
     if build_lama_literals:

@@ -216,6 +216,66 @@ def _compute_grad_norm(model: torch.nn.Module) -> float:
     return math.sqrt(total) if total > 0 else 0.0
 
 
+def _is_qid(value: str) -> bool:
+    text = value.strip()
+    return text.startswith("Q") and text[1:].isdigit()
+
+
+def _resize_vocab_state(
+    model: CFMModel,
+    state: Dict[str, torch.Tensor],
+    allow_resize: bool,
+) -> bool:
+    if not allow_resize:
+        return False
+    resized = False
+    key_weights: Dict[str, torch.Tensor] = {}
+    if hasattr(model.backbone, "token_emb"):
+        key_weights["backbone.token_emb.weight"] = model.backbone.token_emb.weight
+    if hasattr(model.backbone, "emb"):
+        key_weights["backbone.emb.weight"] = model.backbone.emb.weight
+    if hasattr(model.backbone, "lm_head"):
+        key_weights["backbone.lm_head.weight"] = model.backbone.lm_head.weight
+
+    for key, current_weight in key_weights.items():
+        if key not in state:
+            continue
+        old_weight = state[key]
+        if old_weight.shape == current_weight.shape:
+            continue
+        old_vocab = int(old_weight.shape[0])
+        new_vocab = int(current_weight.shape[0])
+        copy_rows = min(old_vocab, new_vocab)
+        new_weight = current_weight.detach().cpu().clone()
+        if old_weight.dim() == 1 or new_weight.dim() == 1:
+            new_weight[:copy_rows] = old_weight[:copy_rows]
+        else:
+            copy_cols = min(old_weight.shape[1], new_weight.shape[1])
+            new_weight[:copy_rows, :copy_cols] = old_weight[:copy_rows, :copy_cols]
+            if old_weight.shape[1] != new_weight.shape[1]:
+                logger.warning(
+                    "vocab_resize_dim_mismatch key=%s old_shape=%s new_shape=%s copied_rows=%s copied_cols=%s",
+                    key,
+                    tuple(old_weight.shape),
+                    tuple(new_weight.shape),
+                    copy_rows,
+                    copy_cols,
+                )
+        init_rows = max(new_vocab - copy_rows, 0)
+        logger.info(
+            "vocab_resize key=%s old_vocab=%s new_vocab=%s copied=%s init=%s",
+            key,
+            old_vocab,
+            new_vocab,
+            copy_rows,
+            init_rows,
+        )
+        state[key] = new_weight
+        if old_vocab != new_vocab:
+            resized = True
+    return resized
+
+
 def _load_factbank(factbank_dir: Path) -> List[Dict[str, object]]:
     import pandas as pd
 
@@ -641,6 +701,7 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
     collapse_window = int(train_cfg.get("collapse_window", 50))
     nonfinite_lr_reduce_every = int(train_cfg.get("nonfinite_lr_reduce_every", 0))
     nonfinite_lr_reduce_factor = float(train_cfg.get("nonfinite_lr_reduce_factor", 0.5))
+    allow_vocab_resize_on_resume = bool(train_cfg.get("allow_vocab_resize_on_resume", False))
 
     facts = _build_fact_index(records, answer_codes)
     relation_ids, relation_to_indices = _build_relation_index(facts)
@@ -657,6 +718,7 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
     pred_window: deque[list[str]] = deque(maxlen=collapse_window) if collapse_window > 0 else deque()
     pred_counter: Counter = Counter()
     pred_total = 0
+    collapse_detected = False
     collapse_active = False
 
     resume = bool(train_cfg.get("resume", True))
@@ -668,13 +730,19 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
         if ckpt_path:
             logger.info("resume_checkpoint start path=%s", ckpt_path)
             checkpoint = _load_checkpoint(ckpt_path)
+            vocab_resized = False
             if "model" in checkpoint:
-                model.load_state_dict(checkpoint["model"])
+                state = checkpoint["model"]
+                vocab_resized = _resize_vocab_state(model, state, allow_vocab_resize_on_resume)
+                model.load_state_dict(state)
             else:
                 logger.warning("resume_checkpoint missing=model_state path=%s", ckpt_path)
             if "optimizer" in checkpoint:
-                optimizer.load_state_dict(checkpoint["optimizer"])
-                _move_optimizer_state(optimizer, device)
+                if vocab_resized:
+                    logger.info("resume_checkpoint optimizer_reset reason=vocab_resize")
+                else:
+                    optimizer.load_state_dict(checkpoint["optimizer"])
+                    _move_optimizer_state(optimizer, device)
             else:
                 logger.warning("resume_checkpoint missing=optimizer_state path=%s", ckpt_path)
             start_step = int(checkpoint.get("step", 0))
@@ -995,24 +1063,34 @@ def main(config: Path = typer.Option(..., help="Path to config YAML")) -> None:
             if collapse_window > 0 and pred_total > 0:
                 top_label, top_count = max(pred_counter.items(), key=lambda x: x[1])
                 top1_freq = top_count / pred_total
+                top1_qid = ""
+                top1_qid_freq = 0.0
+                qid_counts = {label: count for label, count in pred_counter.items() if _is_qid(label)}
+                if qid_counts:
+                    top1_qid, top1_qid_count = max(qid_counts.items(), key=lambda x: x[1])
+                    top1_qid_freq = top1_qid_count / pred_total
                 unique_pct = len(pred_counter) / pred_total
                 if len(pred_counter) > 1:
                     probs = np.array(list(pred_counter.values()), dtype=np.float32) / pred_total
                     entropy = float(-(probs * np.log(probs + 1e-9)).sum() / math.log(len(pred_counter)))
                 else:
                     entropy = 0.0
-                collapse_active = obj_prior_weight > 0.0 and (
+                collapse_detected = (
                     top1_freq >= _COLLAPSE_TOP1_THRESHOLD
                     or unique_pct <= _COLLAPSE_UNIQUE_THRESHOLD
                     or entropy <= _COLLAPSE_ENTROPY_THRESHOLD
                 )
+                collapse_active = obj_prior_weight > 0.0 and collapse_detected
                 logger.info(
-                    "collapse_diag window=%s top1_freq=%.4f top_label=%s entropy=%.4f unique_pct=%.4f collapse_active=%s",
+                    "collapse_diag window=%s top1_freq=%.4f top_label=%s top1_qid_freq=%.4f top1_qid=%s entropy=%.4f unique_pct=%.4f collapse_detected=%s collapse_active=%s",
                     collapse_window,
                     top1_freq,
                     top_label,
+                    top1_qid_freq,
+                    top1_qid,
                     entropy,
                     unique_pct,
+                    collapse_detected,
                     collapse_active,
                 )
             last_log_time = now

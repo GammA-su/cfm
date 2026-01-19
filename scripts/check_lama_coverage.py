@@ -204,8 +204,13 @@ def _iter_lama_records(
                     record["masked_sentence"] = _first_value(data, ("masked_sentence", "masked_sentences"))
                     predicate_id = _first_value(data, ("predicate_id", "relation_id", "relation"))
                     record["predicate_id"] = predicate_id
-                    if cfg_name == "google_re" and not predicate_id:
-                        record["literal_only"] = True
+                    if cfg_name == "google_re":
+                        relation_value = _first_value(data, ("relation",))
+                        if not relation_value and predicate_id:
+                            record["relation"] = predicate_id
+                        if not predicate_id:
+                            record["relation"] = ""
+                            record["literal_only"] = True
                     record["sub_uri"] = _first_value(data, ("sub_uri", "subj_uri", "subject_uri"))
                     record["obj_uri"] = _first_value(data, ("obj_uri", "object_uri"))
                     record["gold_label"] = _first_value(data, ("obj_label", "object_label", "obj", "answer"))
