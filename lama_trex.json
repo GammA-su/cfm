@@ -1,0 +1,92 @@
+{
+  "trex": {
+    "accuracy": 0.0,
+    "accuracy_uri": 0.0,
+    "accuracy_text": 0.0,
+    "calibration": {
+      "bin_acc": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "bin_conf": [
+        0.08094972943945322,
+        0.14786370460508108,
+        0.24727883667165781,
+        0.3497283549650627,
+        0.4388667831166846,
+        0.549009594321251,
+        0.6179762184619904,
+        0.7183998227119446,
+        0.0,
+        0.0
+      ],
+      "bin_count": [
+        256,
+        667,
+        651,
+        272,
+        122,
+        20,
+        8,
+        4,
+        0,
+        0
+      ]
+    },
+    "samples": [
+      {
+        "prompt": "Fill in the blank: The A605 road is a main road in the English counties of ____ and Cambridgeshire.",
+        "pred": "Q11174946 Q8013266 Q4871802 Q1265421 Q5470444 Q3517941 Q174597",
+        "pred_mapped": "",
+        "pred_qid": "",
+        "gold": "Northamptonshire",
+        "gold_uri": "Q23115",
+        "conf": 0.26048505306243896
+      },
+      {
+        "prompt": "Fill in the blank: The A605 road is a main road in the English counties of ____ and Cambridgeshire.",
+        "pred": "Q11174946 Q8013266 Q4871802 Q1265421 Q5470444 Q3517941 Q174597",
+        "pred_mapped": "",
+        "pred_qid": "",
+        "gold": "Northamptonshire",
+        "gold_uri": "Q23115",
+        "conf": 0.26048505306243896
+      },
+      {
+        "prompt": "Fill in the blank: It connects the Leicestershire town of Market Harborough and the A6 with the ____ town of Oundle and the A605.",
+        "pred": "Q1310006 Q5352062 Q3132595",
+        "pred_mapped": "",
+        "pred_qid": "",
+        "gold": "Northamptonshire",
+        "gold_uri": "Q23115",
+        "conf": 0.2642941176891327
+      },
+      {
+        "prompt": "Fill in the blank: It connects the Leicestershire town of Market Harborough and the A6 with the ____ town of Oundle and the A605.",
+        "pred": "Q1310006 Q5352062 Q3132595",
+        "pred_mapped": "",
+        "pred_qid": "",
+        "gold": "Northamptonshire",
+        "gold_uri": "Q23115",
+        "conf": 0.2642941176891327
+      },
+      {
+        "prompt": "Fill in the blank: It connects the Leicestershire town of Market Harborough and the A6 with the ____ town of Oundle and the A605.",
+        "pred": "Q1310006 Q5352062 Q3132595",
+        "pred_mapped": "",
+        "pred_qid": "",
+        "gold": "Northamptonshire",
+        "gold_uri": "Q23115",
+        "conf": 0.2642941176891327
+      }
+    ]
+  }
+}

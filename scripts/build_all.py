@@ -621,7 +621,7 @@ def main(
     torch_info = configure_torch(cpu_threads=cpu_threads, prefer_gpu=prefer_gpu)
 
     rvq_cfg = cfg["rvq"]
-    rvq_prefer_gpu = bool(rvq_cfg.get("prefer_gpu", False))
+    rvq_prefer_gpu = bool(rvq_cfg.get("prefer_gpu", True))
     faiss_info = resolve_faiss(prefer_gpu=rvq_prefer_gpu, cpu_threads=cpu_threads) if use_faiss else {
         "faiss_available": False,
         "faiss_gpu_available": False,

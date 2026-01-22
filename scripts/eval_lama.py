@@ -9,6 +9,13 @@ import time
 from fnmatch import fnmatch
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
+from collections import Counter
+
+_ROOT = Path(__file__).resolve().parents[1]
+_SRC = _ROOT / "src"
+for _path in (_ROOT, _SRC):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
 from forge_omega_500.runtime import (
     DEFAULT_CPU_THREADS,
@@ -66,10 +73,35 @@ import yaml
 _set_startup_stage("import datasets")
 from datasets import DownloadConfig, get_dataset_config_names, load_dataset
 from datasets.download.download_manager import DownloadManager
+_set_startup_stage("import pandas")
+import pandas as pd
 _set_startup_stage("import rich.console")
 from rich.console import Console
 
 from forge_omega_500.data.rvq import load_code_to_label, lookup_code_label
+from scripts.ckpt_io import get_ckpt_step, load_checkpoint
+from codebook import (
+    build_code_matrix,
+    build_reverse_codebook,
+    candidate_rows_from_logits,
+    constrained_decode_by_logprobs,
+    constrained_decode_candidates_by_logprobs,
+    build_slot_index,
+    code_vocab_size_from_df,
+    codes_from_answer,
+    decode_codes,
+    ensure_inverted_index,
+    load_answer_codebook,
+    normalize_lama_answer,
+    normalize_wikidata_qid,
+)
+from metrics_kbqa import (
+    code_tuple_em,
+    exact_match,
+    negative_margin_stats,
+    orbit_consistency,
+)
+
 from forge_omega_500.eval.metrics import calibration_curve
 from forge_omega_500.model.cfm import CFMModel
 from forge_omega_500.model.utils import SimpleTokenizer, pad_sequences, set_seed
@@ -350,16 +382,150 @@ def _map_pred_to_label(pred: str, qid_to_label: Dict[str, str]) -> Tuple[str, st
     raw = pred.strip()
     if not raw:
         return pred, ""
-    qid = ""
-    if raw.isdigit():
-        qid = f"Q{raw}"
-    elif raw.startswith("Q") and raw[1:].isdigit():
-        qid = raw
+    qid = normalize_wikidata_qid(raw) or ""
     if qid:
         label = qid_to_label.get(qid, "")
         if label:
             return label, qid
     return pred, qid
+
+
+def _answer_is_qid(answer: str) -> bool:
+    return bool(answer and normalize_wikidata_qid(answer) == answer)
+
+
+def _answer_type_counts(answers: Iterable[str]) -> Dict[str, int]:
+    counts = {"qid": 0, "literal": 0}
+    for answer in answers:
+        if not answer:
+            continue
+        if _answer_is_qid(answer):
+            counts["qid"] += 1
+        else:
+            counts["literal"] += 1
+    return counts
+
+
+def _code_accuracy(pred_codes: List[int], gold_codes: List[int]) -> Tuple[int, int, int]:
+    slot_total = min(len(pred_codes), len(gold_codes))
+    if slot_total == 0:
+        return 0, 0, 0
+    slot_correct = sum(1 for idx in range(slot_total) if pred_codes[idx] == gold_codes[idx])
+    tuple_correct = 1 if slot_correct == slot_total and len(pred_codes) == len(gold_codes) else 0
+    return tuple_correct, slot_correct, slot_total
+
+
+def _validate_code_space(pred_codes: List[int], code_vocab_size: int) -> Tuple[int, int]:
+    if not pred_codes:
+        return 0, 0
+    codes_min = min(pred_codes)
+    codes_max = max(pred_codes)
+    if codes_min < 0 or codes_max >= code_vocab_size:
+        raise ValueError(
+            "pred_codes out of codebook range; likely token IDs or wrong head. "
+            f"min={codes_min} max={codes_max} code_vocab_size={code_vocab_size}"
+        )
+    return codes_min, codes_max
+
+
+
+def _constrained_decode(
+    logp: torch.Tensor,
+    code_mat: np.ndarray,
+    answers: List[str],
+    chunk_size: int = 4096,
+) -> Tuple[List[str], np.ndarray]:
+    if logp.numel() == 0 or code_mat.size == 0:
+        return [], np.zeros((0, 0), dtype=np.int64)
+    if logp.dim() != 3:
+        raise ValueError(f"logp must have shape [B,S,C], got {tuple(logp.shape)}")
+    batch_size, slot_count, _ = logp.shape
+    best_scores = torch.full((batch_size,), -float("inf"), device=logp.device)
+    best_idx = torch.zeros((batch_size,), dtype=torch.long, device=logp.device)
+    total = code_mat.shape[0]
+    for start in range(0, total, chunk_size):
+        end = min(start + chunk_size, total)
+        chunk = torch.tensor(code_mat[start:end], device=logp.device, dtype=torch.long)
+        scores = None
+        for slot in range(slot_count):
+            slot_logp = logp[:, slot, :]
+            idx = chunk[:, slot].unsqueeze(0).expand(batch_size, -1)
+            gathered = slot_logp.gather(1, idx)
+            scores = gathered if scores is None else scores + gathered
+        if scores is None:
+            continue
+        chunk_best_scores, chunk_best_idx = scores.max(dim=1)
+        improved = chunk_best_scores > best_scores
+        if improved.any():
+            best_scores[improved] = chunk_best_scores[improved]
+            best_idx[improved] = chunk_best_idx[improved] + start
+    best_idx_cpu = best_idx.cpu().numpy()
+    pred_answers = [answers[int(idx)] for idx in best_idx_cpu]
+    pred_codes = code_mat[best_idx_cpu]
+    return pred_answers, pred_codes
+
+def _select_nearest_candidate(
+    candidates: Iterable[str],
+    answer_codes: Dict[str, List[int]],
+    pred_codes: List[int],
+) -> str | None:
+    best_answer = None
+    best_dist = None
+    for answer in candidates:
+        codes = answer_codes.get(answer)
+        if codes is None:
+            continue
+        max_len = max(len(codes), len(pred_codes))
+        dist = 0
+        for idx in range(max_len):
+            a = codes[idx] if idx < len(codes) else None
+            b = pred_codes[idx] if idx < len(pred_codes) else None
+            if a != b:
+                dist += 1
+        if best_dist is None or dist < best_dist or (dist == best_dist and answer < best_answer):
+            best_dist = dist
+            best_answer = answer
+    return best_answer
+
+
+def _project_oov(
+    pred_codes: List[int],
+    slot_index: List[Dict[int, List[str]]],
+    answer_codes: Dict[str, List[int]],
+    slot_conf: List[float] | None = None,
+) -> str | None:
+    if not pred_codes or not slot_index or len(pred_codes) != len(slot_index):
+        return None
+    slot_order = list(range(len(pred_codes)))
+    if slot_conf and len(slot_conf) == len(pred_codes):
+        slot_order = [idx for idx, _ in sorted(enumerate(slot_conf), key=lambda item: item[1])]
+    for drop_count in range(0, len(pred_codes) + 1):
+        drop_slots = set(slot_order[:drop_count])
+        candidates = None
+        for idx in range(len(pred_codes)):
+            if idx in drop_slots:
+                continue
+            answers = slot_index[idx].get(pred_codes[idx], [])
+            if candidates is None:
+                candidates = set(answers)
+            else:
+                candidates &= set(answers)
+            if not candidates:
+                break
+        if candidates:
+            projected = _select_nearest_candidate(candidates, answer_codes, pred_codes)
+            if projected:
+                return projected
+    return None
+
+
+def _score_answer(pred_answer: str, gold_answer: str) -> Tuple[float, float | None, float | None]:
+    acc = 1.0 if pred_answer and gold_answer and pred_answer == gold_answer else 0.0
+    if _answer_is_qid(gold_answer):
+        return acc, acc, None
+    if gold_answer:
+        return acc, None, acc
+    return 0.0, None, None
 
 
 def _decode_pred(tokenizer: SimpleTokenizer, token_ids: List[int]) -> str:
@@ -409,6 +575,10 @@ def _fallback_token_from_logits(
 @app.command()
 def main(
     config: Path = typer.Option(..., help="Path to config YAML"),
+    ckpt: Path = typer.Option(
+        Path("out/ckpt/model.pt"),
+        help="Checkpoint path",
+    ),
     subset: str = typer.Option(
         "all",
         help="LAMA subset: trex, google_re, conceptnet, squad, or all",
@@ -416,6 +586,31 @@ def main(
     limit: int | None = typer.Option(
         None,
         help="Max samples to evaluate (default: eval.max_samples from config)",
+    ),
+    store_samples: int = typer.Option(
+        5,
+        help="How many sample predictions to store per subset",
+    ),
+    pred_hist_topk: int = typer.Option(
+        50,
+        help="Top-k size for prediction histogram",
+    ),
+    decode: str = typer.Option(
+        "constrained",
+        help="Decode mode: argmax or constrained",
+    ),
+    orbit_key: str = typer.Option(
+        "entity",
+        help="Key to group orbits for consistency (fallback prompt or disabled)",
+    ),
+    margin_metrics: bool = typer.Option(
+        True,
+        "--margin-metrics/--no-margin-metrics",
+        help="Compute negative margin diagnostics",
+    ),
+    project_oov: bool = typer.Option(
+        False,
+        help="Project OOV code tuples to nearest codebook answer",
     ),
     out: Path | None = typer.Option(
         None,
@@ -487,10 +682,13 @@ def main(
         hf_model_name=model_cfg.get("hf_model_name"),
     )
     logger.info("init_model done time=%.2fs", time.perf_counter() - t0)
-    ckpt = out_dir / "ckpt/model.pt"
     logger.info("load_checkpoint start path=%s", ckpt)
-    model.load_state_dict(torch.load(ckpt, map_location="cpu"))
+    checkpoint = load_checkpoint(ckpt, map_location="cpu")
+    ckpt_step = get_ckpt_step(checkpoint)
+    state = checkpoint["model"] if isinstance(checkpoint, dict) and "model" in checkpoint else checkpoint
+    model.load_state_dict(state)
     logger.info("load_checkpoint done")
+    logger.info("eval_ckpt path=%s step=%s", ckpt, ckpt_step)
     model.eval()
 
     device = torch.device("cuda" if torch_info.get("torch_cuda") else "cpu")
@@ -498,6 +696,20 @@ def main(
     logger.info("model_to_device done device=%s", device.type)
 
     code_to_answer = _build_code_to_answer_map(codes_dir / "code_to_label.parquet")
+    answer_codebook_df = pd.read_parquet(codes_dir / "answer_codes.parquet")
+    answer_codebook = load_answer_codebook(codes_dir / "answer_codes.parquet")
+    reverse_codebook = build_reverse_codebook(answer_codebook_df)
+    slot_index = build_slot_index(answer_codebook_df)
+    code_mat = build_code_matrix(answer_codebook_df)
+    code_vocab_size = code_vocab_size_from_df(answer_codebook_df)
+    use_candidates = bool(eval_cfg.get("use_candidates", False))
+    candidate_topk_per_slot = int(eval_cfg.get("candidate_topk_per_slot", 16))
+    candidate_max = int(eval_cfg.get("candidate_max", 4096))
+    index_path = Path(eval_cfg.get("index_path", "data/codes/answer_codes.index.npz"))
+    index_offsets = None
+    index_flat = None
+    if use_candidates:
+        index_offsets, index_flat = ensure_inverted_index(index_path, code_mat, code_vocab_size)
     factbank_dir = Path(data_cfg["factbank_dir"])
     qid_to_label = _load_qid_to_label(factbank_dir / "qid_to_label.parquet")
 
@@ -540,6 +752,9 @@ def main(
         max_gen_tokens = 4
     abstain_on_empty = bool(inf_cfg.get("abstain_on_empty", False))
 
+    store_samples = max(0, int(store_samples))
+    pred_hist_topk = max(0, int(pred_hist_topk))
+
     for cfg_name in target_configs:
         max_samples = limit_samples
         logger.info("load_dataset start cfg=%s", cfg_name)
@@ -567,6 +782,57 @@ def main(
         accuracies_uri = []
         accuracies_text = []
         predictions = []
+        gold_hist = Counter()
+        pred_collapse_hist = Counter()
+        gold_answers: List[str] = []
+        gold_in_codebook = 0
+        pred_in_codebook = 0
+        pred_total = 0
+        skipped_no_code = 0
+        pred_oov_count = 0
+        pred_tuple_found = 0
+        tuple_correct = 0
+        tuple_total = 0
+        slot_correct = 0
+        slot_total = 0
+        projected_oov_count = 0
+        argmax_pred_total = 0
+        argmax_pred_oov_count = 0
+        argmax_pred_tuple_found = 0
+        argmax_tuple_correct = 0
+        argmax_tuple_total = 0
+        argmax_slot_correct = 0
+        argmax_slot_total = 0
+        constrained_pred_total = 0
+        constrained_pred_oov_count = 0
+        constrained_pred_tuple_found = 0
+        constrained_tuple_correct = 0
+        constrained_tuple_total = 0
+        constrained_slot_correct = 0
+        constrained_slot_total = 0
+        answer_em_total = 0
+        answer_em_argmax_correct = 0
+        answer_em_constrained_correct = 0
+        code_em_total = 0
+        code_em_argmax_correct = 0
+        code_em_constrained_correct = 0
+        gold_answer_nonempty = 0
+        gold_codes_found = 0
+        pred_codes_in_range = 0
+        gold_codes_min = None
+        gold_codes_max = None
+        gold_codes_shape = None
+        orbit_preds: Dict[str, List[str]] = {}
+        margin_logits: List[np.ndarray] = []
+        margin_golds: List[np.ndarray] = []
+        pred_codes_min = None
+        pred_codes_max = None
+        pred_codes_shape = None
+        pred_codes_head: List[List[int]] = []
+        gold_codes_head: List[List[int] | None] = []
+        pred_codes_all: List[List[int]] = []
+        gold_codes_all: List[List[int]] = []
+        candidate_sizes: List[int] = []
         log_every = int(eval_cfg.get("log_every", 50))
         time_log_interval = float(eval_cfg.get("time_log_interval", 30.0))
         eval_start = time.perf_counter()
@@ -574,6 +840,7 @@ def main(
         last_log_idx = 0
         next_time_log = eval_start + time_log_interval
         processed = 0
+        decode_mode = decode.lower().strip()
 
         for idx, example in enumerate(ds, start=1):
             prompt, prompt_field = _build_prompt_with_field(example)
@@ -603,6 +870,9 @@ def main(
             )
             generated_token_count = max(0, int(generated.size(1)) - 1)
             pred_text = _decode_pred(tokenizer, generated[0].tolist())
+            pred_codes_np = np.asarray(codes.cpu().numpy(), dtype=np.int64)
+            if pred_codes_shape is None:
+                pred_codes_shape = list(pred_codes_np.shape)
             fallback_used = False
             mapping_hit = False
             if not pred_text.strip() and not abstain_on_empty:
@@ -627,19 +897,112 @@ def main(
             gold = _gold_answer(example)
             gold_uri = _first_value(example, ("obj_uri", "object_uri"))
             mapped_label, pred_qid = _map_pred_to_label(pred_text, qid_to_label)
-            acc_uri = None
-            acc_text = None
-            if gold_uri:
-                acc_uri = 1.0 if pred_qid and pred_qid == gold_uri else 0.0
-                acc = acc_uri
+            gold_answer = normalize_lama_answer(gold, gold_uri)
+            gold_codes = codes_from_answer(answer_codebook_df, gold_answer)
+            gold_codes_np = None if gold_codes is None else np.asarray(gold_codes, dtype=np.int64)
+            if gold_answer:
+                gold_answer_nonempty += 1
+            if gold_codes_np is not None:
+                gold_codes_found += 1
+                codes_min_g = int(gold_codes_np.min())
+                codes_max_g = int(gold_codes_np.max())
+                gold_codes_min = codes_min_g if gold_codes_min is None else min(gold_codes_min, codes_min_g)
+                gold_codes_max = codes_max_g if gold_codes_max is None else max(gold_codes_max, codes_max_g)
+            pred_codes_argmax = pred_codes_np[0]
+            codes_min, codes_max = _validate_code_space(pred_codes_argmax.tolist(), code_vocab_size)
+            pred_codes_in_range += 1
+            pred_codes_min = codes_min if pred_codes_min is None else min(pred_codes_min, codes_min)
+            pred_codes_max = codes_max if pred_codes_max is None else max(pred_codes_max, codes_max)
+            if len(pred_codes_head) < 5:
+                pred_codes_head.append(pred_codes_argmax.tolist())
+            if len(gold_codes_head) < 5:
+                gold_codes_head.append(gold_codes_np.tolist() if gold_codes_np is not None else None)
+            pred_codes_all.append(pred_codes_argmax.tolist())
+            if gold_codes_np is not None:
+                gold_codes_all.append(gold_codes_np.tolist())
+
+            slot_logits = torch.stack(addr_logits, dim=1)
+            if margin_metrics and gold_codes_np is not None:
+                margin_logits.append(slot_logits[0].detach().cpu().numpy())
+                margin_golds.append(gold_codes_np)
+            if use_candidates:
+                if index_offsets is None or index_flat is None:
+                    raise ValueError("candidate index not available")
+                cand_rows = candidate_rows_from_logits(
+                    slot_logits,
+                    index_offsets,
+                    index_flat,
+                    topk_per_slot=candidate_topk_per_slot,
+                    max_candidates=candidate_max,
+                )
+                if cand_rows:
+                    candidate_sizes.append(int(len(cand_rows[0])))
+                pred_rows, pred_codes = constrained_decode_candidates_by_logprobs(slot_logits, code_mat, cand_rows)
+                constrained_codes_row = pred_codes[0].detach().cpu().numpy()
             else:
-                if _is_numeric_literal(gold):
-                    pred_norm = _normalize_answer(pred_text)
-                    gold_norm = _normalize_answer(gold)
-                else:
-                    pred_norm, gold_norm = _normalize_for_em(pred_text, gold)
-                acc_text = 1.0 if pred_norm == gold_norm else 0.0
-                acc = acc_text
+                constrained_codes_matrix = constrained_decode_by_logprobs(
+                    slot_logits[0].detach().cpu().numpy()[None, ...],
+                    code_mat,
+                    chunk=int(eval_cfg.get("constrained_chunk", 4096)),
+                )
+                constrained_codes_row = np.asarray(constrained_codes_matrix[0], dtype=np.int64)
+            constrained_answer = decode_codes(reverse_codebook, constrained_codes_row.tolist()) or "__OOV__"
+
+            orbit_id = None
+            if orbit_key in example:
+                orbit_id = str(example.get(orbit_key))
+            elif orbit_key == "prompt":
+                orbit_id = prompt
+            if orbit_id:
+                orbit_preds.setdefault(orbit_id, []).append(constrained_answer)
+
+            decoded_argmax = decode_codes(reverse_codebook, pred_codes_argmax.tolist())
+            argmax_answer = decoded_argmax if decoded_argmax is not None else "__OOV__"
+            argmax_pred_total += 1
+            if decoded_argmax is not None:
+                argmax_pred_tuple_found += 1
+            if argmax_answer == "__OOV__":
+                argmax_pred_oov_count += 1
+
+            constrained_pred_total += 1
+            if constrained_answer == "__OOV__":
+                constrained_pred_oov_count += 1
+            else:
+                constrained_pred_tuple_found += 1
+
+            if decode_mode not in {"argmax", "constrained"}:
+                raise ValueError(f"invalid decode mode: {decode}")
+            if decode_mode == "argmax":
+                pred_answer = argmax_answer
+                pred_codes_used = pred_codes_argmax
+                if pred_answer == "__OOV__" and project_oov:
+                    slot_conf = [float(torch.softmax(logits, dim=-1)[0].max().item()) for logits in addr_logits]
+                    projected = _project_oov(pred_codes_used.tolist(), slot_index, answer_codebook, slot_conf=slot_conf)
+                    if projected:
+                        pred_answer = projected
+                        projected_oov_count += 1
+            else:
+                pred_answer = constrained_answer
+                pred_codes_used = constrained_codes_row
+
+            if gold_answer:
+                answer_em_total += 1
+                if exact_match(argmax_answer, gold_answer):
+                    answer_em_argmax_correct += 1
+                if exact_match(constrained_answer, gold_answer):
+                    answer_em_constrained_correct += 1
+            if gold_codes_np is not None:
+                code_em_total += 1
+                if code_tuple_em(tuple(pred_codes_argmax.tolist()), tuple(gold_codes_np.tolist())):
+                    code_em_argmax_correct += 1
+                if code_tuple_em(tuple(constrained_codes_row.tolist()), tuple(gold_codes_np.tolist())):
+                    code_em_constrained_correct += 1
+
+            if pred_answer != "__OOV__":
+                pred_tuple_found += 1
+
+            acc, acc_uri, acc_text = _score_answer(pred_answer, gold_answer)
+
 
             confidences.append(float(conf.item()))
             accuracies.append(acc)
@@ -647,15 +1010,56 @@ def main(
                 accuracies_uri.append(acc_uri)
             if acc_text is not None:
                 accuracies_text.append(acc_text)
-            predictions.append({
-                "prompt": prompt,
-                "pred": pred_text,
-                "pred_mapped": mapped_label if mapped_label != pred_text else "",
-                "pred_qid": pred_qid,
-                "gold": gold,
-                "gold_uri": gold_uri,
-                "conf": float(conf.item()),
-            })
+            if gold_answer:
+                gold_answers.append(gold_answer)
+                if gold_codes_np is not None:
+                    gold_in_codebook += 1
+                    tuple_total += 1
+                    tuple_hit, slots_hit, slots_total = _code_accuracy(pred_codes_used.tolist(), gold_codes_np.tolist())
+                    tuple_correct += tuple_hit
+                    slot_correct += slots_hit
+                    slot_total += slots_total
+
+                    argmax_tuple_total += 1
+                    tuple_hit_a, slots_hit_a, slots_total_a = _code_accuracy(
+                        pred_codes_argmax.tolist(), gold_codes_np.tolist()
+                    )
+                    argmax_tuple_correct += tuple_hit_a
+                    argmax_slot_correct += slots_hit_a
+                    argmax_slot_total += slots_total_a
+
+                    constrained_tuple_total += 1
+                    tuple_hit_c, slots_hit_c, slots_total_c = _code_accuracy(
+                        constrained_codes_row.tolist(), gold_codes_np.tolist()
+                    )
+                    constrained_tuple_correct += tuple_hit_c
+                    constrained_slot_correct += slots_hit_c
+                    constrained_slot_total += slots_total_c
+                else:
+                    skipped_no_code += 1
+            pred_total += 1
+            if pred_answer == "__OOV__":
+                pred_oov_count += 1
+            else:
+                pred_in_codebook += 1
+            pred_key = pred_answer or _normalize_answer(pred_text).lower()
+            if pred_key:
+                pred_collapse_hist[pred_key] += 1
+            gold_key = gold_answer or _normalize_answer(gold).lower()
+            if gold_key:
+                gold_hist[gold_key] += 1
+            if len(predictions) < store_samples:
+                predictions.append({
+                    "prompt": prompt,
+                    "pred": pred_text,
+                    "pred_mapped": mapped_label if mapped_label != pred_text else "",
+                    "pred_qid": pred_qid,
+                    "pred_answer": pred_answer,
+                    "gold": gold,
+                    "gold_uri": gold_uri,
+                    "gold_answer": gold_answer,
+                    "conf": float(conf.item()),
+                })
             processed += 1
             now = time.perf_counter()
             log_due = processed % log_every == 0 or now >= next_time_log
@@ -677,16 +1081,151 @@ def main(
                 if now >= next_time_log:
                     next_time_log = now + time_log_interval
 
+        pred_codes_np_full = np.asarray(pred_codes_all, dtype=np.int64) if pred_codes_all else np.zeros((0, 0), dtype=np.int64)
+        pred_codes_shape = list(pred_codes_np_full.shape)
+        total_evaluated_confirm = int(pred_codes_np_full.shape[0])
+        if total_evaluated_confirm != processed:
+            raise ValueError(
+                f"pred_codes shape mismatch: pred_rows={total_evaluated_confirm} total_evaluated={processed}"
+            )
+        if pred_codes_np_full.size > 0:
+            pred_codes_min = int(pred_codes_np_full.min())
+            pred_codes_max = int(pred_codes_np_full.max())
+        gold_codes_np_full = np.asarray(gold_codes_all, dtype=np.int64) if gold_codes_all else np.zeros((0, 0), dtype=np.int64)
+        gold_codes_shape = list(gold_codes_np_full.shape)
+        if gold_codes_np_full.size > 0:
+            gold_codes_min = int(gold_codes_np_full.min())
+            gold_codes_max = int(gold_codes_np_full.max())
         acc_overall = float(np.mean(accuracies)) if accuracies else 0.0
         acc_uri = float(np.mean(accuracies_uri)) if accuracies_uri else 0.0
         acc_text = float(np.mean(accuracies_text)) if accuracies_text else 0.0
+        unique_pred_count = len(pred_collapse_hist)
+        top1_freq = 0.0
+        if processed and pred_collapse_hist:
+            top1_freq = max(pred_collapse_hist.values()) / processed
+        gold_type_counts = _answer_type_counts(gold_answers)
+        tuple_acc = tuple_correct / tuple_total if tuple_total else 0.0
+        slot_acc = slot_correct / slot_total if slot_total else 0.0
+        pred_tuple_found_rate = pred_tuple_found / pred_total if pred_total else 0.0
+        argmax_tuple_acc = argmax_tuple_correct / argmax_tuple_total if argmax_tuple_total else 0.0
+        argmax_slot_acc = argmax_slot_correct / argmax_slot_total if argmax_slot_total else 0.0
+        argmax_pred_tuple_found_rate = argmax_pred_tuple_found / argmax_pred_total if argmax_pred_total else 0.0
+        constrained_tuple_acc = constrained_tuple_correct / constrained_tuple_total if constrained_tuple_total else 0.0
+        constrained_slot_acc = constrained_slot_correct / constrained_slot_total if constrained_slot_total else 0.0
+        constrained_pred_tuple_found_rate = constrained_pred_tuple_found / constrained_pred_total if constrained_pred_total else 0.0
+        answer_em_constrained = answer_em_constrained_correct / answer_em_total if answer_em_total else 0.0
+        answer_em_argmax = answer_em_argmax_correct / answer_em_total if answer_em_total else 0.0
+        code_em_constrained = code_em_constrained_correct / code_em_total if code_em_total else 0.0
+        code_em_argmax = code_em_argmax_correct / code_em_total if code_em_total else 0.0
+        if decode_mode == "constrained":
+            code_em = code_em_constrained
+            answer_em = answer_em_constrained
+        else:
+            code_em = code_em_argmax
+            answer_em = answer_em_argmax
+        orbit_stats = orbit_consistency(orbit_preds) if orbit_preds else {"count": 0, "rate": None}
+        if margin_metrics and margin_logits:
+            margin_stats = negative_margin_stats(
+                np.asarray(margin_logits, dtype=np.float32),
+                np.asarray(margin_golds, dtype=np.int64),
+            )
+        else:
+            margin_stats = {"negative_margin_rate": 0.0, "margin_min_mean": 0.0, "margin_min_p50": 0.0, "margin_min_p05": 0.0}
+        gold_answer_nonempty_rate = gold_answer_nonempty / processed if processed else 0.0
+        gold_codes_found_rate = gold_codes_found / processed if processed else 0.0
+        pred_codes_in_range_rate = pred_codes_in_range / pred_total if pred_total else 0.0
+        candidate_size_mean = None
+        candidate_size_p95 = None
+        if use_candidates and candidate_sizes:
+            candidate_size_mean = float(np.mean(candidate_sizes))
+            candidate_size_p95 = float(np.percentile(candidate_sizes, 95))
         report[cfg_name] = {
             "accuracy": acc_overall,
             "accuracy_uri": acc_uri,
             "accuracy_text": acc_text,
             "calibration": calibration_curve(confidences, accuracies, bins=int(eval_cfg["calib_bins"])),
-            "samples": predictions[:5],
+            "total_evaluated": processed,
+            "stored_samples": len(predictions),
+            "stored_samples_limit": store_samples,
+            "unique_pred_count": unique_pred_count,
+            "top1_freq": top1_freq,
+            "gold_answer_type_counts": gold_type_counts,
+            "code_em": code_em,
+            "answer_em": answer_em,
+            "orbit_consistency": orbit_stats,
+            "negative_margin": margin_stats,
+            "em_breakdown": {
+                "answer_em_constrained": answer_em_constrained,
+                "answer_em_argmax": answer_em_argmax,
+                "code_em_constrained": code_em_constrained,
+                "code_em_argmax": code_em_argmax,
+            },
+            "alignment_sanity": {
+                "gold_answer_nonempty_rate": gold_answer_nonempty_rate,
+                "gold_codes_found_rate": gold_codes_found_rate,
+                "pred_codes_in_range_rate": pred_codes_in_range_rate,
+            },
+            "skipped_no_code": skipped_no_code,
+            "pred_codes_shape": pred_codes_shape,
+            "pred_codes_min": pred_codes_min,
+            "pred_codes_max": pred_codes_max,
+            "code_vocab_size": code_vocab_size,
+            "total_evaluated_confirm": total_evaluated_confirm,
+            "gold_codes_shape": gold_codes_shape,
+            "gold_codes_min": gold_codes_min,
+            "gold_codes_max": gold_codes_max,
+            "pred_codes_head": pred_codes_head,
+            "gold_codes_head": gold_codes_head,
+            "pred_oov_count": pred_oov_count,
+            "pred_tuple_found": {"count": pred_tuple_found, "rate": pred_tuple_found_rate},
+            "argmax_pred_tuple_found_rate": argmax_pred_tuple_found_rate,
+            "argmax_pred_oov_count": argmax_pred_oov_count,
+            "constrained_pred_tuple_found_rate": constrained_pred_tuple_found_rate,
+            "constrained_pred_oov_count": constrained_pred_oov_count,
+            "decode_mode_used": decode_mode,
+            "projected_oov_count": projected_oov_count,
+            "code_acc_tuple": {"correct": tuple_correct, "total": tuple_total, "acc": tuple_acc},
+            "code_acc_slot": {"correct": slot_correct, "total": slot_total, "acc": slot_acc},
+            "code_acc_tuple_argmax": {
+                "correct": argmax_tuple_correct,
+                "total": argmax_tuple_total,
+                "acc": argmax_tuple_acc,
+            },
+            "code_acc_slot_argmax": {
+                "correct": argmax_slot_correct,
+                "total": argmax_slot_total,
+                "acc": argmax_slot_acc,
+            },
+            "code_acc_tuple_constrained": {
+                "correct": constrained_tuple_correct,
+                "total": constrained_tuple_total,
+                "acc": constrained_tuple_acc,
+            },
+            "code_acc_slot_constrained": {
+                "correct": constrained_slot_correct,
+                "total": constrained_slot_total,
+                "acc": constrained_slot_acc,
+            },
+            "codebook_coverage": {
+                "gold_in_codebook": gold_in_codebook,
+                "gold_total": len(gold_answers),
+                "pred_in_codebook": pred_in_codebook,
+                "pred_total": pred_total,
+                "skipped_no_code": skipped_no_code,
+            },
+            "pred_hist_topk": [
+                {"answer": answer, "count": count}
+                for answer, count in pred_collapse_hist.most_common(pred_hist_topk)
+            ],
+            "gold_hist_topk": [
+                {"value": value, "count": count}
+                for value, count in gold_hist.most_common(pred_hist_topk)
+            ],
+            "samples": predictions,
         }
+        if use_candidates:
+            report[cfg_name]["candidate_size_mean"] = candidate_size_mean
+            report[cfg_name]["candidate_size_p95"] = candidate_size_p95
         logger.info(
             "eval_config done cfg=%s accuracy=%.4f acc_uri=%.4f acc_text=%.4f",
             cfg_name,

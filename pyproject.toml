@@ -30,8 +30,20 @@ dependencies = [
 faiss-cpu = ["faiss-cpu>=1.7.4"]
 faiss-gpu = ["faiss-gpu>=1.7.2,<1.8"]
 
+[dependency-groups]
+dev = ["ruff>=0.4.8"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*.py" = ["E402"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.pytest.ini_options]
 addopts = "-q"
+markers = [
+  "slow: slow tests",
+]

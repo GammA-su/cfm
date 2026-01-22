@@ -1,10 +1,8 @@
 seed: 1234
-
 runtime:
   cpu_threads: 16
   prefer_gpu: true
   use_faiss: true
-
 data:
   raw_dir: data/raw
   factbank_dir: data/factbank
@@ -15,63 +13,50 @@ data:
   orbits_per_fact: 40
   negatives_per_fact: 16
   use_direct_tar: true
-  wikidata5m_sources: ["transductive"]
+  wikidata5m_sources:
+  - transductive
   hf_cache_dir: .cache/huggingface
   use_streaming: true
   shuffle: false
   shuffle_buffer: 1000
   local_files_only: false
-
 model:
   backbone: tiny
-  hf_model_name: "sshleifer/tiny-gpt2"
+  hf_model_name: sshleifer/tiny-gpt2
   d_model: 256
   n_layers: 2
   n_heads: 4
   max_seq_len: 64
-  vocab_max: null
+  vocab_max: 131072
   m: 6
   K: 2048
   d_code: 256
-
 rvq:
   iters: 8
   seed: 1234
-  prefer_gpu: true
+  prefer_gpu: false
   require_faiss_gpu: false
-  gpu_search_batch: 256
-
+  gpu_search_batch: 64
 train:
-  batch_size: 64
-  steps: 60000
+  batch_size: 8
+  steps: 200000
   lr: 3.0e-05
   weight_decay: 0.01
   log_every: 20
   contrast_margin: 0.2
-  gen_loss_weight: 1.0
-  tuple_loss_weight: 1.0
-  slot_loss_weight: 0.2
-  candidate_topk_per_slot: 16
-  candidate_max: 4096
-  index_path: data/codes/answer_codes.index.npz
-  require_gen_loss: false
-  require_gen_loss_steps: 200
   checkpoint_every: 1000
   checkpoint_on_start: true
   resume: true
   allow_vocab_resize_on_resume: true
-  amp: false
+  amp: true
   grad_clip_norm: 0.5
   max_nan_skips: 3
   orbit_consistency_weight: 0.1
-
+  grad_accum_steps: 8
+  gradient_checkpointing: true
+  precision: bf16
 inference:
   max_gen_tokens: 8
-
 eval:
   max_samples: 200
   calib_bins: 10
-  use_candidates: false
-  candidate_topk_per_slot: 16
-  candidate_max: 4096
-  index_path: data/codes/answer_codes.index.npz
