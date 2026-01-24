@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import logging
 import math
 import random
@@ -351,6 +352,125 @@ def _balanced_sample_records_by_year(
     return selected
 
 
+def _split_records_holdout(
+    records: List[Dict[str, object]],
+    holdout_frac: float,
+    seed: int,
+) -> Tuple[List[Dict[str, object]], List[Dict[str, object]]]:
+    if holdout_frac <= 0.0 or len(records) <= 1:
+        return records, []
+    n_holdout = int(len(records) * holdout_frac)
+    n_holdout = max(1, min(n_holdout, len(records) - 1))
+    rng = random.Random(seed)
+    shuffled = list(records)
+    rng.shuffle(shuffled)
+    holdout = shuffled[:n_holdout]
+    train = shuffled[n_holdout:]
+    return train, holdout
+
+
+def _compose_overfit_split_report(report_train: dict, report_holdout: dict) -> dict:
+    combined = dict(report_holdout)
+    combined["split"] = {"train": report_train, "holdout": report_holdout}
+    return combined
+
+
+def _should_overfit_early_exit(
+    acc_streak: int,
+    acc: float,
+    threshold: float,
+    patience: int,
+) -> Tuple[int, bool]:
+    if acc >= threshold:
+        acc_streak += 1
+    else:
+        acc_streak = 0
+    return acc_streak, acc_streak >= patience
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _save_overfit_tokenizer(tokenizer_path: Path, run_dir: Path) -> dict:
+    run_dir.mkdir(parents=True, exist_ok=True)
+    target = run_dir / "tokenizer.json"
+    shutil.copyfile(tokenizer_path, target)
+    tokenizer = SimpleTokenizer.load(target)
+    return {
+        "tokenizer_path_saved": str(target.resolve()),
+        "tokenizer_vocab_size": len(tokenizer.vocab),
+        "tokenizer_sha256": _sha256_file(target),
+    }
+
+
+def _run_overfit_report_for_examples(
+    model: CFMModel,
+    examples: List[Dict[str, object]],
+    tokenizer: SimpleTokenizer,
+    max_seq_len: int,
+    tuple_code_matrix: torch.Tensor,
+    tuple_answers: List[str],
+    run_id: str,
+    source: str,
+    answer_filter_used: str,
+    gold_year_rate: float,
+    gold_qid_rate: float,
+    answer_filter_row_count: int,
+) -> dict:
+    if not examples:
+        return {
+            "code_em": 0.0,
+            "answer_em": 0.0,
+            "orbit_consistency": {"count": 0, "rate": None},
+            "negative_margin": {"negative_margin_rate": 0.0, "margin_min_mean": 0.0, "margin_min_p50": 0.0, "margin_min_p05": 0.0},
+            "answer_filter_used": answer_filter_used,
+            "gold_year_rate": gold_year_rate,
+            "gold_qid_rate": gold_qid_rate,
+            "answer_filter_row_count": answer_filter_row_count,
+            "em_breakdown": {
+                "answer_em_constrained": 0.0,
+                "answer_em_argmax": 0.0,
+                "code_em_constrained": 0.0,
+                "code_em_argmax": 0.0,
+            },
+            "decode_mode_used": "constrained",
+            "pred_hist_topk": [],
+            "gold_hist_topk": [],
+            "n_eval": 0,
+            "candidate_size": int(tuple_code_matrix.size(0)),
+            "run_id": run_id,
+            "source": source,
+        }
+    device = next(model.parameters()).device
+    prompts = [[tokenizer.bos_id] + tokenizer.encode(ex["prompt"]) for ex in examples]
+    prompt_ids, prompt_masks = pad_sequences(prompts, tokenizer.pad_id, max_len=max_seq_len)
+    prompt_ids = prompt_ids.to(device)
+    prompt_masks = prompt_masks.to(device)
+    with torch.no_grad():
+        addr_logits, _, _ = model.encode_prompt(prompt_ids, prompt_masks)
+    slot_logits = torch.stack([log.float() for log in addr_logits], dim=1)
+    gold_tuple_idx = torch.tensor([int(ex.get("tuple_idx", -1)) for ex in examples], device=device)
+    gold_answers = [str(ex["answer"]) for ex in examples]
+    return _compute_overfit_report(
+        slot_logits=slot_logits,
+        code_matrix=tuple_code_matrix.to(device),
+        gold_tuple_idx=gold_tuple_idx,
+        tuple_idx_to_answer=tuple_answers,
+        gold_answers=gold_answers,
+        run_id=run_id,
+        source=source,
+        answer_filter_used=answer_filter_used,
+        gold_year_rate=gold_year_rate,
+        gold_qid_rate=gold_qid_rate,
+        answer_filter_row_count=answer_filter_row_count,
+    )
+
+
 
 def _download_lama_archive(cache_dir: Path, local_files_only: bool) -> Path:
     from datasets import DownloadConfig
@@ -513,6 +633,100 @@ def _filter_lama_year_examples(
         if limit and len(records) >= limit:
             break
     return records
+
+
+def _filter_lama_examples(
+    iterable: Iterable[Dict[str, object]],
+    limit: int,
+    *,
+    year_only: bool,
+    qid_only: bool = False,
+) -> List[Dict[str, object]]:
+    records: List[Dict[str, object]] = []
+    for idx, example in enumerate(iterable):
+        masked_sentence = _first_value(example.get("masked_sentence") or example.get("masked_sentences"))
+        if not masked_sentence:
+            continue
+        obj_label = _first_value(
+            example.get("obj_label") or example.get("object_label") or example.get("obj") or example.get("answer")
+        )
+        obj_uri = _first_value(example.get("obj_uri") or example.get("object_uri"))
+        normalized_answer = normalize_lama_answer(obj_label, obj_uri)
+        if not normalized_answer:
+            continue
+        if year_only and not _is_year_literal(normalized_answer):
+            continue
+        if qid_only and not _is_qid(normalized_answer):
+            continue
+        predicate_id = _first_value(example.get("predicate_id") or example.get("relation_id") or example.get("relation"))
+        prompt = "Fill in the blank: " + _replace_mask_tokens(masked_sentence)
+        records.append({
+            "fact_id": idx,
+            "question_orbits": [prompt],
+            "object_label": normalized_answer,
+            "relation_id": predicate_id or "unknown",
+            "relation_label": predicate_id or "",
+            "subject_label": _first_value(example.get("sub_label") or example.get("subject_label")),
+            "hard_negatives": [],
+        })
+        if limit and len(records) >= limit:
+            break
+    return records
+
+
+def _iter_lama_subset_records(
+    archive_path: Path,
+    subset: str,
+    max_samples: int,
+) -> Iterable[Dict[str, object]]:
+    yielded = 0
+    subset_lower = subset.lower()
+    with tarfile.open(archive_path, mode="r:gz") as tar:
+        for member in tar.getmembers():
+            if not member.isfile():
+                continue
+            if not member.name.lower().startswith(subset_lower):
+                continue
+            fileobj = tar.extractfile(member)
+            if fileobj is None:
+                continue
+            for raw in fileobj:
+                data = json.loads(raw.decode("utf-8"))
+                yield data
+                yielded += 1
+                if max_samples and yielded >= max_samples:
+                    return
+
+
+def _load_lama_overfit_records(
+    subset: str,
+    limit: int,
+    cache_dir: Path,
+    local_files_only: bool,
+    *,
+    year_only: bool,
+    qid_only: bool = False,
+) -> List[Dict[str, object]]:
+    from datasets import DownloadConfig, load_dataset
+
+    subset = subset.lower()
+    if subset == "trex":
+        records = _load_trex_overfit_records(limit, cache_dir=cache_dir, local_files_only=local_files_only)
+        if year_only:
+            records = [rec for rec in records if _is_year_literal(str(rec.get("object_label", "")).strip())]
+        if qid_only:
+            records = [rec for rec in records if _is_qid(str(rec.get("object_label", "")).strip())]
+        return records
+
+    try:
+        dl_config = DownloadConfig(cache_dir=str(cache_dir), local_files_only=local_files_only)
+        dataset = load_dataset("facebook/lama", subset, split="train", download_config=dl_config)
+        iterable: Iterable[Dict[str, object]] = dataset
+    except Exception:
+        archive_path = _download_lama_archive(cache_dir, local_files_only=local_files_only)
+        iterable = _iter_lama_subset_records(archive_path, subset, max_samples=0)
+
+    return _filter_lama_examples(iterable, limit=limit, year_only=year_only, qid_only=qid_only)
 
 
 def _resize_vocab_state(
@@ -1014,6 +1228,10 @@ def _compute_overfit_report(
     run_id: str,
     source: str,
     topk: int = 10,
+    answer_filter_used: str = "none",
+    gold_year_rate: float = 0.0,
+    gold_qid_rate: float = 0.0,
+    answer_filter_row_count: int = 0,
 ) -> dict:
     logits_np = slot_logits.detach().cpu().numpy()
     code_matrix_np = code_matrix.detach().cpu().numpy()
@@ -1053,6 +1271,10 @@ def _compute_overfit_report(
         "answer_em": answer_em,
         "orbit_consistency": {"count": 0, "rate": None},
         "negative_margin": negative_margin,
+        "answer_filter_used": answer_filter_used,
+        "gold_year_rate": gold_year_rate,
+        "gold_qid_rate": gold_qid_rate,
+        "answer_filter_row_count": answer_filter_row_count,
         "em_breakdown": {
             "answer_em_constrained": answer_em,
             "answer_em_argmax": answer_em_argmax,
@@ -1069,8 +1291,7 @@ def _compute_overfit_report(
     }
 
 
-def _write_overfit_report(*, report: dict, out_dir: Path, run_id: str) -> Path:
-    report_dir = out_dir / "reports" / "overfit-lama-years" / run_id
+def _write_overfit_report(*, report: dict, report_dir: Path, out_dir: Path) -> Path:
     report_dir.mkdir(parents=True, exist_ok=True)
     report_path = report_dir / "report.json"
     payload = json.dumps(report, indent=2)
@@ -1127,6 +1348,21 @@ def main(
         "--overfit-lama-years",
         help="Overfit a tiny Google_RE year slice to sanity-check literal learning",
     ),
+    overfit_lama_qids: bool = typer.Option(
+        False,
+        "--overfit-lama-qids",
+        help="Overfit a tiny LAMA slice restricted to QID answers",
+    ),
+    overfit_lama_subset: Optional[str] = typer.Option(
+        None,
+        "--overfit-lama-subset",
+        help="Overfit a tiny LAMA subset (google_re, trex, conceptnet)",
+    ),
+    overfit_holdout_frac: float = typer.Option(
+        0.25,
+        "--overfit-holdout-frac",
+        help="Holdout fraction for overfit subset gating",
+    ),
     overfit_n: int = typer.Option(128, "--overfit-n", help="Overfit sample count"),
     overfit_seed: int = typer.Option(0, "--overfit-seed", help="Overfit sampling seed"),
     overfit_balanced: bool = typer.Option(True, "--overfit-balanced/--no-overfit-balanced", help="Balance overfit sampling"),
@@ -1167,7 +1403,7 @@ def main(
     local_files_only = bool(data_cfg.get("local_files_only", False))
     cache_dir = Path(data_cfg.get("hf_cache_dir", ".cache/huggingface"))
     tuple_code_matrix = None
-    tuple_years: List[str] = []
+    tuple_answers: List[str] = []
     global_code_matrix_np = None
     global_code_matrix_device = None
     global_tuple2idx: Optional[Dict[Tuple[int, ...], int]] = None
@@ -1175,9 +1411,28 @@ def main(
     global_index_offsets: Optional[np.ndarray] = None
     global_index_flat: Optional[np.ndarray] = None
     overfit_run_id: str | None = None
+    gold_year_rate = 0.0
+    gold_qid_rate = 0.0
 
-    if overfit_trex and overfit_lama_years:
-        raise ValueError("overfit_trex and overfit_lama_years are mutually exclusive")
+    overfit_lama_subset_name = overfit_lama_subset.lower().strip() if overfit_lama_subset else None
+    overfit_year_only = False
+    overfit_qid_only = False
+    if overfit_lama_subset_name and overfit_lama_subset_name not in {"google_re", "trex", "conceptnet"}:
+        raise ValueError("overfit_lama_subset must be one of google_re, trex, conceptnet")
+    if overfit_lama_years:
+        if overfit_lama_qids:
+            raise ValueError("overfit-lama-years and overfit-lama-qids are mutually exclusive")
+        if overfit_lama_subset_name and overfit_lama_subset_name != "google_re":
+            raise ValueError("overfit-lama-years requires subset google_re")
+        overfit_lama_subset_name = "google_re"
+        overfit_year_only = True
+    if overfit_lama_qids:
+        if overfit_lama_subset_name is None:
+            overfit_lama_subset_name = "trex"
+        overfit_qid_only = True
+
+    if overfit_trex and overfit_lama_subset_name:
+        raise ValueError("overfit_trex and overfit_lama_subset are mutually exclusive")
 
     if overfit_trex:
         trex_limit = int(train_cfg.get("overfit_trex_samples", 512))
@@ -1197,55 +1452,82 @@ def main(
             k=int(model_cfg["K"]),
         )
         logger.info("overfit_answer_codes built answers=%s", len(answer_codes))
-    elif overfit_lama_years:
+    elif overfit_lama_subset_name:
         overfit_run_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
         years_limit = int(train_cfg.get("overfit_lama_years_samples", 512))
         logger.info(
-            "load_lama_years_overfit start limit=%s local_files_only=%s cache_dir=%s",
+            "load_lama_overfit start subset=%s limit=%s local_files_only=%s cache_dir=%s",
+            overfit_lama_subset_name,
             years_limit,
             local_files_only,
             cache_dir,
         )
         t0 = time.perf_counter()
-        records = _load_google_re_overfit_records(years_limit, cache_dir=cache_dir, local_files_only=local_files_only)
-        logger.info("load_lama_years_overfit done records=%s time=%.2fs", len(records), time.perf_counter() - t0)
+        records = _load_lama_overfit_records(
+            overfit_lama_subset_name,
+            years_limit,
+            cache_dir=cache_dir,
+            local_files_only=local_files_only,
+            year_only=False,
+            qid_only=False,
+        )
+        gold_year_total = sum(1 for rec in records if _is_year_literal(str(rec.get("object_label", "")).strip()))
+        gold_qid_total = sum(1 for rec in records if _is_qid(str(rec.get("object_label", "")).strip()))
+        gold_total = len(records)
+        gold_year_rate = gold_year_total / gold_total if gold_total else 0.0
+        gold_qid_rate = gold_qid_total / gold_total if gold_total else 0.0
+        if overfit_lama_subset_name == "trex" and gold_qid_rate > 0.0:
+            overfit_qid_only = True
+        if overfit_qid_only or gold_qid_rate >= 0.90:
+            records = [rec for rec in records if _is_qid(str(rec.get("object_label", "")).strip())]
+            overfit_qid_only = True
+        elif overfit_year_only or gold_year_rate >= 0.90:
+            records = [rec for rec in records if _is_year_literal(str(rec.get("object_label", "")).strip())]
+            overfit_year_only = True
+        logger.info(
+            "load_lama_overfit done records=%s gold_year_rate=%.4f gold_qid_rate=%.4f time=%.2fs",
+            len(records),
+            gold_year_rate,
+            gold_qid_rate,
+            time.perf_counter() - t0,
+        )
         import pandas as pd
 
         logger.info("load_answer_codes start path=%s", codes_dir / "answer_codes.parquet")
         t0 = time.perf_counter()
         answer_df = pd.read_parquet(codes_dir / "answer_codes.parquet")
-        year_to_codes: Dict[str, Tuple[int, ...]] = {}
+        answer_to_codes: Dict[str, Tuple[int, ...]] = {}
         filtered_records: List[Dict[str, object]] = []
         for rec in records:
-            year = str(rec.get("object_label", "")).strip()
-            if not year:
+            answer = str(rec.get("object_label", "")).strip()
+            if not answer:
                 continue
-            codes = codes_from_answer(answer_df, year)
+            codes = codes_from_answer(answer_df, answer)
             if codes is None:
                 continue
-            year_to_codes[year] = codes
+            answer_to_codes[answer] = codes
             filtered_records.append(rec)
         records = filtered_records
-        if overfit_balanced:
+        if overfit_balanced and overfit_year_only:
             records = _balanced_sample_records_by_year(records, overfit_n, overfit_seed)
         elif overfit_n > 0:
             rng = random.Random(overfit_seed)
             rng.shuffle(records)
             records = records[:overfit_n]
-        answer_codes = {year: list(codes) for year, codes in year_to_codes.items()}
-        tuple_years = sorted({str(rec.get("object_label", "")).strip() for rec in records if str(rec.get("object_label", "")).strip()})
-        tuple_code_matrix = torch.tensor([list(year_to_codes[year]) for year in tuple_years], dtype=torch.long)
-        tuple2idx = {tuple(year_to_codes[year]): idx for idx, year in enumerate(tuple_years)}
+        answer_codes = {answer: list(codes) for answer, codes in answer_to_codes.items()}
+        tuple_answers = sorted({str(rec.get("object_label", "")).strip() for rec in records if str(rec.get("object_label", "")).strip()})
+        tuple_code_matrix = torch.tensor([list(answer_to_codes[answer]) for answer in tuple_answers], dtype=torch.long)
+        tuple2idx = {tuple(answer_to_codes[answer]): idx for idx, answer in enumerate(tuple_answers)}
         for rec in records:
-            year = str(rec.get("object_label", "")).strip()
-            codes = year_to_codes.get(year)
+            answer = str(rec.get("object_label", "")).strip()
+            codes = answer_to_codes.get(answer)
             if codes is None:
                 continue
             rec["tuple_idx"] = tuple2idx[tuple(codes)]
         logger.info(
-            "load_answer_codes done answers=%s years=%s time=%.2fs",
+            "load_answer_codes done answers=%s tuples=%s time=%.2fs",
             len(answer_codes),
-            len(tuple_years),
+            len(tuple_answers),
             time.perf_counter() - t0,
         )
 
@@ -1304,21 +1586,30 @@ def main(
     if generated_orbits:
         logger.info("factbank_orbits_generated count=%s per_fact=%s", generated_orbits, fallback_orbits)
 
+    train_records = records
+    holdout_records: List[Dict[str, object]] = []
+    if overfit_lama_subset_name:
+        train_records, holdout_records = _split_records_holdout(records, overfit_holdout_frac, overfit_seed)
     logger.info("build_examples start")
     t0 = time.perf_counter()
-    examples = _build_examples(records, answer_codes)
-    if overfit_lama_years and tuple_code_matrix is not None:
+    examples = _build_examples(train_records, answer_codes)
+    holdout_examples = _build_examples(holdout_records, answer_codes) if holdout_records else []
+    if tuple_code_matrix is not None:
         tuple2idx = {tuple(row): idx for idx, row in enumerate(tuple_code_matrix.tolist())}
         for ex in examples:
             codes_tuple = tuple(ex["codes"])
             ex["tuple_idx"] = tuple2idx.get(codes_tuple, -1)
+        for ex in holdout_examples:
+            codes_tuple = tuple(ex["codes"])
+            ex["tuple_idx"] = tuple2idx.get(codes_tuple, -1)
     logger.info(
-        "build_examples done examples=%s orbits_per_fact=%s time=%.2fs",
+        "build_examples done examples=%s holdout=%s orbits_per_fact=%s time=%.2fs",
         len(examples),
-        len(records[0]["question_orbits"]) if records else 0,
+        len(holdout_examples),
+        len(train_records[0]["question_orbits"]) if train_records else 0,
         time.perf_counter() - t0,
     )
-    if (overfit_trex or overfit_lama_years) and not examples:
+    if (overfit_trex or overfit_lama_subset_name) and not examples:
         raise RuntimeError("overfit dataset produced zero training examples; check codebook coverage and filters")
     gen_loss_weight = float(train_cfg.get("gen_loss_weight", 1.0))
     gen_targets, gen_total, gen_coverage = _gen_target_coverage(examples)
@@ -1333,9 +1624,11 @@ def main(
     )
     if gen_loss_weight > 0.0 and gen_coverage == 0.0:
         raise RuntimeError("gen_loss enabled but no non-empty generation targets found in examples")
-    overfit_enabled = overfit_trex or overfit_lama_years
+    overfit_enabled = overfit_trex or overfit_lama_subset_name is not None
     overfit_examples = examples if overfit_enabled else []
     texts = [ex["prompt"] for ex in examples] + [ex["answer"] for ex in examples]
+    if holdout_examples:
+        texts += [ex["prompt"] for ex in holdout_examples] + [ex["answer"] for ex in holdout_examples]
     logger.info("build_tokenizer start texts=%s", len(texts))
     t0 = time.perf_counter()
     tokenizer = SimpleTokenizer.build(texts, vocab_max=model_cfg.get("vocab_max"))
@@ -1379,7 +1672,12 @@ def main(
         steps = int(train_cfg.get("overfit_steps", 1000))
         overfit_eval_every = int(train_cfg.get("overfit_eval_every", 50))
         overfit_eval_samples = int(train_cfg.get("overfit_eval_samples", 256))
-        mode = "trex" if overfit_trex else "lama_years"
+        if overfit_trex:
+            mode = "trex"
+        elif overfit_lama_subset_name:
+            mode = overfit_lama_subset_name
+        else:
+            mode = "lama"
         logger.info(
             "overfit_mode enabled mode=%s steps=%s eval_every=%s eval_samples=%s",
             mode,
@@ -1510,7 +1808,7 @@ def main(
         cloze_ratio,
         len(relation_ids),
     )
-    if overfit_lama_years:
+    if overfit_year_only:
         tuple_loss_weight = 1.0
         slot_loss_weight = 0.2
     logger.info(
@@ -1555,6 +1853,8 @@ def main(
     nonfinite_events = 0
     gen_loss_zero_steps = 0
     overfit_success_streak = 0
+    overfit_acc_threshold = float(train_cfg.get("overfit_acc_threshold", 0.99))
+    overfit_acc_patience = int(train_cfg.get("overfit_acc_patience", 3))
 
     for step in range(start_step, steps):
         batch = _sample_fact_batch(
@@ -2002,14 +2302,14 @@ def main(
             overfit_tuple_acc = tuple_acc
             top1_year = ""
             top1_freq = 0.0
-            if tuple_pred_idx is not None and tuple_years:
+            if tuple_pred_idx is not None and tuple_answers:
                 preds = tuple_pred_idx.detach().cpu().tolist()
                 valid_targets = [int(t) for t in tuple_targets.detach().cpu().tolist() if t >= 0]
                 if preds:
                     counts = {}
                     for idx in preds:
-                        year = tuple_years[int(idx)]
-                        counts[year] = counts.get(year, 0) + 1
+                        answer = tuple_answers[int(idx)]
+                        counts[answer] = counts.get(answer, 0) + 1
                     top1_year = max(counts.items(), key=lambda x: x[1])[0]
                     top1_freq = max(counts.values()) / max(len(preds), 1)
                     if valid_targets:
@@ -2027,12 +2327,21 @@ def main(
                 min(len(overfit_examples), overfit_eval_samples),
             )
             model.train()
-            if overfit_tuple_acc >= 0.99:
-                overfit_success_streak += 1
-            else:
-                overfit_success_streak = 0
-            if overfit_success_streak >= 3:
-                logger.info("overfit_early_exit step=%s tuple_acc=%.4f streak=%s", step + 1, overfit_tuple_acc, overfit_success_streak)
+            overfit_success_streak, should_exit = _should_overfit_early_exit(
+                overfit_success_streak,
+                acc,
+                overfit_acc_threshold,
+                overfit_acc_patience,
+            )
+            if should_exit:
+                logger.info(
+                    "overfit_early_exit step=%s acc=%.4f tuple_acc=%.4f pred_tuple_found_rate=%.4f streak=%s",
+                    step + 1,
+                    acc,
+                    overfit_tuple_acc,
+                    pred_tuple_found_rate,
+                    overfit_success_streak,
+                )
                 break
 
         if (step + 1) % steps_per_epoch == 0:
@@ -2052,29 +2361,63 @@ def main(
             epoch_code_counts = [Counter() for _ in range(int(model_cfg["m"]))]
 
     logger.info("training done time=%.2fs", time.perf_counter() - train_start)
-    if overfit_lama_years and tuple_code_matrix is not None:
+    if overfit_lama_subset_name and tuple_code_matrix is not None:
         model.eval()
-        device = next(model.parameters()).device
-        prompts = [[tokenizer.bos_id] + tokenizer.encode(ex["prompt"]) for ex in overfit_examples]
-        prompt_ids, prompt_masks = pad_sequences(prompts, tokenizer.pad_id, max_len=max_seq_len)
-        prompt_ids = prompt_ids.to(device)
-        prompt_masks = prompt_masks.to(device)
-        with torch.no_grad():
-            addr_logits, _, _ = model.encode_prompt(prompt_ids, prompt_masks)
-        slot_logits = torch.stack([log.float() for log in addr_logits], dim=1)
-        gold_tuple_idx = torch.tensor([int(ex.get("tuple_idx", -1)) for ex in overfit_examples], device=device)
-        gold_answers = [str(ex["answer"]) for ex in overfit_examples]
         run_id = overfit_run_id or f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
-        report = _compute_overfit_report(
-            slot_logits=slot_logits,
-            code_matrix=tuple_code_matrix.to(device),
-            gold_tuple_idx=gold_tuple_idx,
-            tuple_idx_to_answer=tuple_years,
-            gold_answers=gold_answers,
-            run_id=run_id,
-            source="overfit-lama-years",
+        source = "overfit-lama-years" if overfit_year_only and overfit_lama_subset_name == "google_re" else f"overfit-lama-{overfit_lama_subset_name}"
+        answer_filter_used = "qid" if overfit_qid_only else ("year" if overfit_year_only else "none")
+        answer_filter_row_count = len(tuple_answers) if answer_filter_used != "none" else 0
+        report_train = _run_overfit_report_for_examples(
+            model,
+            overfit_examples,
+            tokenizer,
+            max_seq_len,
+            tuple_code_matrix,
+            tuple_answers,
+            run_id,
+            source,
+            answer_filter_used,
+            gold_year_rate if overfit_lama_subset_name else 0.0,
+            gold_qid_rate if overfit_lama_subset_name else 0.0,
+            answer_filter_row_count,
         )
-        report_path = _write_overfit_report(report=report, out_dir=out_dir, run_id=run_id)
+        report_holdout = _run_overfit_report_for_examples(
+            model,
+            holdout_examples,
+            tokenizer,
+            max_seq_len,
+            tuple_code_matrix,
+            tuple_answers,
+            run_id,
+            source,
+            answer_filter_used,
+            gold_year_rate if overfit_lama_subset_name else 0.0,
+            gold_qid_rate if overfit_lama_subset_name else 0.0,
+            answer_filter_row_count,
+        )
+        combined = _compose_overfit_split_report(report_train, report_holdout)
+        report_tag = "overfit-lama-years" if overfit_year_only and overfit_lama_subset_name == "google_re" else f"overfit-lama-{overfit_lama_subset_name}"
+        report_dir = out_dir / "reports" / report_tag / run_id
+        report_dir.mkdir(parents=True, exist_ok=True)
+        tokenizer_meta = {}
+        tokenizer_path = out_dir / "tokenizer.json"
+        if tokenizer_path.exists():
+            tokenizer_meta = _save_overfit_tokenizer(tokenizer_path, report_dir)
+        overfit_ckpt_path = report_dir / "model_overfit.pt"
+        torch.save(
+            {
+                "model": model.state_dict(),
+                "step": steps,
+                "run_id": run_id,
+                "source": "overfit",
+            },
+            overfit_ckpt_path,
+        )
+        print(f"overfit_checkpoint={overfit_ckpt_path.resolve()}")
+        (report_dir / "report_train.json").write_text(json.dumps(report_train, indent=2))
+        (report_dir / "report_holdout.json").write_text(json.dumps(report_holdout, indent=2))
+        combined.update(tokenizer_meta)
+        report_path = _write_overfit_report(report=combined, report_dir=report_dir, out_dir=out_dir)
         logger.info("overfit_report_saved path=%s", report_path)
         model.train()
     _save_checkpoint(ckpt_dir, step=steps, model=model, optimizer=optimizer, rng=rng, epoch_idx=epoch_idx)

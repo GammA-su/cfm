@@ -9,6 +9,8 @@ import numpy as np
 import pandas as pd
 
 _QID_RE = re.compile(r"(Q\d+)", re.IGNORECASE)
+_YEAR_RE = re.compile(r"^\d{4}$")
+_QID_ONLY_RE = re.compile(r"^Q\d+$", re.IGNORECASE)
 
 if TYPE_CHECKING:
     import torch
@@ -31,6 +33,34 @@ def normalize_lama_answer(gold: str | None, gold_uri: str | None) -> str:
     if qid:
         return qid
     return str(gold or "").strip()
+
+
+def is_year_literal(value: str | None) -> bool:
+    text = "" if value is None else str(value).strip()
+    return bool(_YEAR_RE.match(text))
+
+
+def is_qid(value: str | None) -> bool:
+    text = "" if value is None else str(value).strip()
+    return bool(_QID_ONLY_RE.match(text))
+
+
+def year_row_indices(df: pd.DataFrame) -> np.ndarray:
+    answers = df.get("answer")
+    if answers is None:
+        return np.asarray([], dtype=np.int64)
+    values = answers.astype(str).tolist()
+    mask = [is_year_literal(v) for v in values]
+    return np.asarray([i for i, flag in enumerate(mask) if flag], dtype=np.int64)
+
+
+def qid_row_indices(df: pd.DataFrame) -> np.ndarray:
+    answers = df.get("answer")
+    if answers is None:
+        return np.asarray([], dtype=np.int64)
+    values = answers.astype(str).tolist()
+    mask = [is_qid(v) for v in values]
+    return np.asarray([i for i, flag in enumerate(mask) if flag], dtype=np.int64)
 
 
 def load_answer_codebook(path: str | Path) -> Dict[str, List[int]]:
@@ -382,6 +412,10 @@ def ensure_answers_in_codebook(
 __all__ = [
     "normalize_wikidata_qid",
     "normalize_lama_answer",
+    "is_year_literal",
+    "is_qid",
+    "year_row_indices",
+    "qid_row_indices",
     "load_answer_codebook",
     "build_code_matrix",
     "build_inverted_index",

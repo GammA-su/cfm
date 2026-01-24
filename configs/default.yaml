@@ -49,8 +49,8 @@ train:
   log_every: 20
   contrast_margin: 0.2
   gen_loss_weight: 1.0
-  tuple_loss_weight: 1.0
-  slot_loss_weight: 0.2
+  tuple_loss_weight: 0.0
+  slot_loss_weight: 1.0
   candidate_topk_per_slot: 16
   candidate_max: 4096
   index_path: data/codes/answer_codes.index.npz

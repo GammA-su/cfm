@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import sys
@@ -91,9 +92,11 @@ from codebook import (
     codes_from_answer,
     decode_codes,
     ensure_inverted_index,
+    is_year_literal,
     load_answer_codebook,
     normalize_lama_answer,
     normalize_wikidata_qid,
+    year_row_indices,
 )
 from metrics_kbqa import (
     code_tuple_em,
@@ -114,6 +117,52 @@ _FILE_LOG_READY = False
 _set_startup_stage("ready")
 
 _DEFAULT_LAMA_SUBSETS = ("google_re", "trex", "conceptnet", "squad")
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _resolve_tokenizer_path(checkpoint_path: Path, override: str | None) -> Path:
+    if override:
+        return Path(override)
+    candidate = checkpoint_path.parent / "tokenizer.json"
+    if candidate.exists():
+        return candidate
+    return Path("out") / "tokenizer.json"
+
+
+def _resolve_checkpoint_path(path: Path) -> Path:
+    if path.is_file():
+        return path
+    if path.is_dir():
+        direct = path / "model_overfit.pt"
+        if direct.is_file():
+            return direct
+        candidates = list(path.rglob("model_overfit.pt"))
+        if candidates:
+            return max(candidates, key=lambda item: item.stat().st_mtime)
+        hint = f"find {path} -name 'model_overfit.pt' -type f -printf '%T@ %p\\n' | sort -n | tail -1"
+        raise ValueError(
+            "checkpoint must be a file; got directory: "
+            f"{path}\nLooked for: {direct} and {path}/**/model_overfit.pt\nHint: {hint}"
+        )
+    raise ValueError(f"checkpoint path does not exist: {path}")
+
+
+def _ckpt_vocab_size(state: dict) -> int | None:
+    for key in ("backbone.token_emb.weight", "backbone.emb.weight"):
+        weight = state.get(key)
+        if weight is not None:
+            try:
+                return int(weight.shape[0])
+            except Exception:
+                continue
+    return None
 
 
 def _ensure_file_logger(out_dir: Path) -> None:
@@ -579,6 +628,16 @@ def main(
         Path("out/ckpt/model.pt"),
         help="Checkpoint path",
     ),
+    checkpoint: Path | None = typer.Option(
+        None,
+        "--checkpoint",
+        help="Override checkpoint path",
+    ),
+    tokenizer_path: Path | None = typer.Option(
+        None,
+        "--tokenizer",
+        help="Override tokenizer path",
+    ),
     subset: str = typer.Option(
         "all",
         help="LAMA subset: trex, google_re, conceptnet, squad, or all",
@@ -586,6 +645,10 @@ def main(
     limit: int | None = typer.Option(
         None,
         help="Max samples to evaluate (default: eval.max_samples from config)",
+    ),
+    max_samples: int | None = typer.Option(
+        None,
+        help="Override eval.max_samples from config",
     ),
     store_samples: int = typer.Option(
         5,
@@ -598,6 +661,15 @@ def main(
     decode: str = typer.Option(
         "constrained",
         help="Decode mode: argmax or constrained",
+    ),
+    use_candidates: bool | None = typer.Option(
+        None,
+        "--use-candidates/--no-candidates",
+        help="Override eval.use_candidates",
+    ),
+    force_answer_filter: str = typer.Option(
+        "auto",
+        help="Force answer filter: auto, none, year, qid",
     ),
     orbit_key: str = typer.Option(
         "entity",
@@ -612,9 +684,10 @@ def main(
         False,
         help="Project OOV code tuples to nearest codebook answer",
     ),
-    out: Path | None = typer.Option(
-        None,
-        help="Output report path (default: out/lama_report.json)",
+    out_report: Path = typer.Option(
+        Path("out/lama_report.json"),
+        "--out-report",
+        help="Output report path",
     ),
 ) -> None:
     cfg = yaml.safe_load(config.read_text())
@@ -638,17 +711,37 @@ def main(
     model_cfg = cfg["model"]
     data_cfg = cfg["data"]
     eval_cfg = cfg["eval"]
+    if max_samples is not None:
+        eval_cfg["max_samples"] = int(max_samples)
+    if use_candidates is not None:
+        eval_cfg["use_candidates"] = bool(use_candidates)
+    force_answer_filter = force_answer_filter.strip().lower()
+    if force_answer_filter not in {"auto", "none", "year", "qid"}:
+        raise ValueError("force-answer-filter must be one of auto, none, year, qid")
+    if checkpoint is not None:
+        ckpt = checkpoint
     inf_cfg = cfg.get("inference", {})
 
     out_dir = Path("out")
     _ensure_file_logger(out_dir)
-    out_path = out if out is not None else out_dir / "lama_report.json"
+    out_path = out_report
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    logger.info("load_tokenizer start")
+    ckpt_path = _resolve_checkpoint_path(Path(ckpt))
+    resolved_tokenizer_path = _resolve_tokenizer_path(ckpt_path, str(tokenizer_path) if tokenizer_path else None)
+    if not resolved_tokenizer_path.exists():
+        raise FileNotFoundError(f"Tokenizer not found: {resolved_tokenizer_path}")
+    logger.info("load_tokenizer start path=%s", resolved_tokenizer_path)
     t0 = time.perf_counter()
-    tokenizer = SimpleTokenizer.load(out_dir / "tokenizer.json")
-    logger.info("load_tokenizer done vocab_size=%s time=%.2fs", len(tokenizer.vocab), time.perf_counter() - t0)
+    tokenizer = SimpleTokenizer.load(resolved_tokenizer_path)
+    tokenizer_vocab_size = len(tokenizer.vocab)
+    tokenizer_sha256 = _sha256_file(resolved_tokenizer_path)
+    logger.info(
+        "load_tokenizer done vocab_size=%s sha256=%s time=%.2fs",
+        tokenizer_vocab_size,
+        tokenizer_sha256,
+        time.perf_counter() - t0,
+    )
 
     codes_dir = Path(data_cfg["codes_dir"])
     codebook_path = codes_dir / "codebooks.safetensors"
@@ -682,13 +775,20 @@ def main(
         hf_model_name=model_cfg.get("hf_model_name"),
     )
     logger.info("init_model done time=%.2fs", time.perf_counter() - t0)
-    logger.info("load_checkpoint start path=%s", ckpt)
-    checkpoint = load_checkpoint(ckpt, map_location="cpu")
+    logger.info("load_checkpoint start path=%s", ckpt_path)
+    checkpoint = load_checkpoint(ckpt_path, map_location="cpu")
     ckpt_step = get_ckpt_step(checkpoint)
     state = checkpoint["model"] if isinstance(checkpoint, dict) and "model" in checkpoint else checkpoint
+    ckpt_vocab_size = _ckpt_vocab_size(state) if isinstance(state, dict) else None
+    if ckpt_vocab_size is not None and ckpt_vocab_size != tokenizer_vocab_size:
+        raise ValueError(
+            "checkpoint/tokenizer vocab mismatch: "
+            f"checkpoint_vocab_size={ckpt_vocab_size} tokenizer_vocab_size={tokenizer_vocab_size} "
+            f"tokenizer_path={resolved_tokenizer_path}"
+        )
     model.load_state_dict(state)
     logger.info("load_checkpoint done")
-    logger.info("eval_ckpt path=%s step=%s", ckpt, ckpt_step)
+    logger.info("eval_ckpt path=%s step=%s", ckpt_path, ckpt_step)
     model.eval()
 
     device = torch.device("cuda" if torch_info.get("torch_cuda") else "cpu")
@@ -702,6 +802,13 @@ def main(
     slot_index = build_slot_index(answer_codebook_df)
     code_mat = build_code_matrix(answer_codebook_df)
     code_vocab_size = code_vocab_size_from_df(answer_codebook_df)
+    year_rows = year_row_indices(answer_codebook_df)
+    year_code_mat = code_mat[year_rows] if year_rows.size else np.zeros((0, 0), dtype=np.int64)
+    qid_rows = np.asarray(
+        [i for i, val in enumerate(answer_codebook_df.get("answer", []).astype(str).tolist()) if normalize_wikidata_qid(val)],
+        dtype=np.int64,
+    )
+    qid_code_mat = code_mat[qid_rows] if qid_rows.size else np.zeros((0, 0), dtype=np.int64)
     use_candidates = bool(eval_cfg.get("use_candidates", False))
     candidate_topk_per_slot = int(eval_cfg.get("candidate_topk_per_slot", 16))
     candidate_max = int(eval_cfg.get("candidate_max", 4096))
@@ -710,6 +817,22 @@ def main(
     index_flat = None
     if use_candidates:
         index_offsets, index_flat = ensure_inverted_index(index_path, code_mat, code_vocab_size)
+    year_index_offsets = None
+    year_index_flat = None
+    if use_candidates and year_rows.size:
+        year_index_offsets, year_index_flat = ensure_inverted_index(
+            Path(str(index_path) + ".years"),
+            year_code_mat,
+            code_vocab_size,
+        )
+    qid_index_offsets = None
+    qid_index_flat = None
+    if use_candidates and qid_rows.size:
+        qid_index_offsets, qid_index_flat = ensure_inverted_index(
+            Path(str(index_path) + ".qids"),
+            qid_code_mat,
+            code_vocab_size,
+        )
     factbank_dir = Path(data_cfg["factbank_dir"])
     qid_to_label = _load_qid_to_label(factbank_dir / "qid_to_label.parquet")
 
@@ -766,6 +889,42 @@ def main(
             if max_samples:
                 ds = ds.select(range(min(max_samples, len(ds))))
         logger.info("load_dataset done cfg=%s samples=%s time=%.2fs", cfg_name, len(ds), time.perf_counter() - t0)
+        gold_year_total = 0
+        gold_qid_total = 0
+        gold_total = 0
+        for example in ds:
+            gold = _gold_answer(example)
+            gold_uri = _first_value(example, ("obj_uri", "object_uri"))
+            gold_answer = normalize_lama_answer(gold, gold_uri)
+            if gold_answer:
+                gold_total += 1
+                if is_year_literal(gold_answer):
+                    gold_year_total += 1
+                if normalize_wikidata_qid(gold_answer):
+                    gold_qid_total += 1
+        gold_year_rate = gold_year_total / gold_total if gold_total else 0.0
+        gold_qid_rate = gold_qid_total / gold_total if gold_total else 0.0
+        if force_answer_filter == "year":
+            answer_filter_used = "year" if year_rows.size else "none"
+        elif force_answer_filter == "qid":
+            answer_filter_used = "qid" if qid_rows.size else "none"
+        elif force_answer_filter == "none":
+            answer_filter_used = "none"
+        else:
+            answer_filter_used = "year" if gold_year_rate >= 0.90 and year_rows.size else "none"
+
+        if answer_filter_used == "year":
+            decode_matrix = year_code_mat
+            decode_offsets = year_index_offsets
+            decode_flat = year_index_flat
+        elif answer_filter_used == "qid":
+            decode_matrix = qid_code_mat
+            decode_offsets = qid_index_offsets
+            decode_flat = qid_index_flat
+        else:
+            decode_matrix = code_mat
+            decode_offsets = index_offsets
+            decode_flat = index_flat
 
         logger.info(
             "subset_runtime cfg=%s device=%s gpu_enabled=%s gpu_count=%s faiss_available=%s faiss_gpu_enabled=%s",
@@ -833,6 +992,14 @@ def main(
         pred_codes_all: List[List[int]] = []
         gold_codes_all: List[List[int]] = []
         candidate_sizes: List[int] = []
+        candidate_hit_total = 0
+        candidate_hit_found = 0
+        tuple_to_row = {tuple(row.tolist()): idx for idx, row in enumerate(code_mat)}
+        decode_row_to_local = None
+        if answer_filter_used == "year" and year_rows.size:
+            decode_row_to_local = {int(row): idx for idx, row in enumerate(year_rows.tolist())}
+        elif answer_filter_used == "qid" and qid_rows.size:
+            decode_row_to_local = {int(row): idx for idx, row in enumerate(qid_rows.tolist())}
         log_every = int(eval_cfg.get("log_every", 50))
         time_log_interval = float(eval_cfg.get("time_log_interval", 30.0))
         eval_start = time.perf_counter()
@@ -926,23 +1093,39 @@ def main(
                 margin_logits.append(slot_logits[0].detach().cpu().numpy())
                 margin_golds.append(gold_codes_np)
             if use_candidates:
-                if index_offsets is None or index_flat is None:
+                if decode_offsets is None or decode_flat is None:
                     raise ValueError("candidate index not available")
                 cand_rows = candidate_rows_from_logits(
                     slot_logits,
-                    index_offsets,
-                    index_flat,
+                    decode_offsets,
+                    decode_flat,
                     topk_per_slot=candidate_topk_per_slot,
                     max_candidates=candidate_max,
                 )
                 if cand_rows:
                     candidate_sizes.append(int(len(cand_rows[0])))
-                pred_rows, pred_codes = constrained_decode_candidates_by_logprobs(slot_logits, code_mat, cand_rows)
+                pred_rows, pred_codes = constrained_decode_candidates_by_logprobs(
+                    slot_logits,
+                    decode_matrix,
+                    cand_rows,
+                )
                 constrained_codes_row = pred_codes[0].detach().cpu().numpy()
+                if gold_codes_np is not None:
+                    gold_row = tuple_to_row.get(tuple(gold_codes_np.tolist()))
+                    if gold_row is not None:
+                        candidate_hit_total += 1
+                        cand_row_set = set(int(x) for x in cand_rows[0].tolist()) if cand_rows else set()
+                        if decode_row_to_local is not None:
+                            local_idx = decode_row_to_local.get(int(gold_row), None)
+                            if local_idx is not None and local_idx in cand_row_set:
+                                candidate_hit_found += 1
+                        else:
+                            if int(gold_row) in cand_row_set:
+                                candidate_hit_found += 1
             else:
                 constrained_codes_matrix = constrained_decode_by_logprobs(
                     slot_logits[0].detach().cpu().numpy()[None, ...],
-                    code_mat,
+                    decode_matrix,
                     chunk=int(eval_cfg.get("constrained_chunk", 4096)),
                 )
                 constrained_codes_row = np.asarray(constrained_codes_matrix[0], dtype=np.int64)
@@ -1139,11 +1322,21 @@ def main(
         if use_candidates and candidate_sizes:
             candidate_size_mean = float(np.mean(candidate_sizes))
             candidate_size_p95 = float(np.percentile(candidate_sizes, 95))
+        candidate_hit_rate = None
+        if use_candidates:
+            candidate_hit_rate = candidate_hit_found / candidate_hit_total if candidate_hit_total else 0.0
         report[cfg_name] = {
             "accuracy": acc_overall,
             "accuracy_uri": acc_uri,
             "accuracy_text": acc_text,
             "calibration": calibration_curve(confidences, accuracies, bins=int(eval_cfg["calib_bins"])),
+            "checkpoint_path": str(ckpt_path.resolve()),
+            "checkpoint_path_used": str(ckpt_path.resolve()),
+            "checkpoint_step": ckpt_step,
+            "tokenizer_path_used": str(resolved_tokenizer_path.resolve()),
+            "tokenizer_vocab_size": tokenizer_vocab_size,
+            "tokenizer_sha256": tokenizer_sha256,
+            "use_candidates": use_candidates,
             "total_evaluated": processed,
             "stored_samples": len(predictions),
             "stored_samples_limit": store_samples,
@@ -1222,16 +1415,27 @@ def main(
                 for value, count in gold_hist.most_common(pred_hist_topk)
             ],
             "samples": predictions,
+            "answer_filter_used": answer_filter_used,
+            "answer_filter_year_rows": int(year_rows.size),
+            "gold_year_rate": gold_year_rate,
+            "gold_qid_rate": gold_qid_rate if gold_total else 0.0,
         }
         if use_candidates:
             report[cfg_name]["candidate_size_mean"] = candidate_size_mean
             report[cfg_name]["candidate_size_p95"] = candidate_size_p95
+            report[cfg_name]["candidate_hit_rate"] = candidate_hit_rate
         logger.info(
             "eval_config done cfg=%s accuracy=%.4f acc_uri=%.4f acc_text=%.4f",
             cfg_name,
             acc_overall,
             acc_uri,
             acc_text,
+        )
+        hit_info = f"{candidate_hit_rate:.4f}" if candidate_hit_rate is not None else "na"
+        print(
+            f"subset={cfg_name} ckpt={ckpt_path.resolve()} step={ckpt_step} "
+            f"candidates={use_candidates} filter={answer_filter_used} "
+            f"hit={hit_info} gold_year_rate={gold_year_rate:.4f} em={answer_em:.4f}"
         )
 
     out_path.write_text(json.dumps(report, indent=2))
